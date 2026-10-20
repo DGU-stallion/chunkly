@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Chunkly",
+  "version": "0.1.0",
+  "description": "英文网页意群阅读辅助：LLM 驱动的意群切分与高亮标注",
+  "permissions": ["storage", "activeTab", "contextMenus"],
+  "host_permissions": ["https://open.bigmodel.cn/*"],
+  "optional_host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"]
+    }
+  ],
+  "options_page": "options.html",
+  "action": {
+    "default_title": "Chunkly"
+  }
+}

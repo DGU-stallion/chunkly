@@ -1,0 +1,24 @@
+{
+  "name": "@chunkly/extension",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Chunkly 浏览器插件：DOM 提取、意群标注渲染、设置页",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/clean-dist.mjs && vite build --config vite.options.config.ts && vite build --config vite.content.config.ts && vite build --config vite.background.config.ts && node scripts/copy-manifest.mjs",
+    "dev": "node scripts/clean-dist.mjs && node scripts/copy-manifest.mjs && concurrently -n options,content,background \"vite build --config vite.options.config.ts --watch\" \"vite build --config vite.content.config.ts --watch\" \"vite build --config vite.background.config.ts --watch\"",
+    "test": "vitest run",
+    "lint": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@chunkly/engine": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.280",
+    "concurrently": "^9.0.1",
+    "jsdom": "^25.0.1",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10",
+    "vitest": "^2.1.4"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "@chunkly/engine",
+  "version": "0.1.0",
+  "description": "意群切分核心引擎：文本 + LLM Provider 配置 -> 结构化切分结果",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4"
+  }
+}
