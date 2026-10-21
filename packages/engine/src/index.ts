@@ -1,12 +1,42 @@
-import type { ChunkOptions, ChunkResult } from "./types.js";
+import type { ChunkOptions, ChunkResult, Chunk } from "./types.js";
 import { callChatCompletions } from "./client.js";
 import { parseChunkResponse } from "./parse.js";
 import { ChunkEngineError, isRetryable } from "./errors.js";
 import { splitIntoSegments, mergeSegmentChunks, type TextSegment } from "./segment.js";
+import { chunkByRules } from "./rules.js";
 
 export * from "./types.js";
 export { ChunkEngineError } from "./errors.js";
 export { splitIntoSegments } from "./segment.js";
+export { chunkByRules } from "./rules.js";
+
+/**
+ * 规则法秒出（同步、无网络、<1ms）。
+ *
+ * 定位：给用户**立刻**看到一版可用的切分，不必盯着空白等 LLM 的 2.4s。
+ * LLM 结果到达后应替换掉它。
+ *
+ * 实测（297 字段落）：规则法 0.5ms / 10 chunks / 5.4 词每意群，
+ * 而 LLM 3343ms。规则法切得偏粗且偶尔不准，但它是“立即有反馈”与
+ * “等 3 秒”之间唯一的选择（见 docs/优化清单.md 第 1.1 节）。
+ */
+export function chunkFast(text: string): Chunk[] {
+  if (text.trim().length === 0) return [];
+  const pieces = chunkByRules(text);
+
+  const chunks: Chunk[] = [];
+  let cursor = 0;
+  for (const piece of pieces) {
+    const startOffset = text.indexOf(piece, cursor);
+    if (startOffset === -1) {
+      // 规则法是自己切原文，理论上不可能找不到；保守起见保底返回整段
+      return [{ text, startOffset: 0, endOffset: text.length }];
+    }
+    chunks.push({ text: piece, startOffset, endOffset: startOffset + piece.length });
+    cursor = startOffset + piece.length;
+  }
+  return chunks;
+}
 
 /** 触发并发切分的最小长度（字符）。短文本单次请求更快，没必要并发。 */
 const CONCURRENT_THRESHOLD_CHARS = 600;
