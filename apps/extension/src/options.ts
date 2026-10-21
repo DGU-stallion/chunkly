@@ -10,7 +10,7 @@
  *   3. 错误提示指向真正要检查的东西（地址与 key 是否同一家）。
  */
 import { loadSettings, saveSettings } from "./storage.js";
-import { COMMANDCODE_PRESET, DEFAULT_SETTINGS, PRESETS, type StoredSettings } from "./types.js";
+import { DEFAULT_SETTINGS, PRESETS, PRESET_EFFORT, type StoredSettings } from "./types.js";
 
 type PresetId = StoredSettings["presetId"];
 
@@ -27,16 +27,9 @@ const testButton = $<HTMLButtonElement>("test");
 const toggleKeyButton = $<HTMLButtonElement>("toggleKey");
 const radios = document.querySelectorAll<HTMLInputElement>('input[name="preset"]');
 
-/** 各预设推荐的推理强度：只对确认支持 off 的服务传值。 */
-const PRESET_EFFORT: Record<PresetId, string> = {
-  commandcode: "off",
-  local: "off",
-  custom: "",
-};
-
 const KEY_HELP: Record<PresetId, string> = {
-  commandcode: "在 CommandCode 计划里生成的 key，以 <code>user_</code> 开头。",
-  local: "本机网关通常不校验 key，随便填即可（如 magpie）。",
+  commandcode: "在 CommandCode 计划里生成的 key，以 <code>user_</code> 开头，共 93 个字符。",
+  local: "本机网关（magpie）不校验 key，随便填即可。",
   custom: "填该服务商签发的 key。",
 };
 

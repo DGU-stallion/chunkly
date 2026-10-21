@@ -4,7 +4,7 @@
  * 这里**不直接发网络请求**——请求在 background service worker 里发出，原因见 background.ts。
  */
 import type { Chunk } from "@chunkly/engine";
-import { applyHighlight, undoHighlight } from "./highlight.js";
+import { applyHighlight, undoHighlight, undoHighlightInRange } from "./highlight.js";
 import type { ChunkResponseMessage } from "./types.js";
 
 const ERROR_HINT: Record<string, string> = {
@@ -62,9 +62,14 @@ async function handleTrigger(): Promise<void> {
     return;
   }
 
-  // 再次切分前先收回上一次的高亮，避免 span 嵌套、也避免页面越改越乱。
-  undoHighlight(document.body);
   ensureHighlightStyleInjected();
+
+  // 只清除**本次选区范围内**的高亮，不清整页。
+  //
+  // 早期实现是 undoHighlight(document.body)，结果用户切了第二段之后
+  // 第一段的高亮全没了。意群辅助的用法就是逐段读、回头对，清空整页等于
+  // 强迫用户只能看一段。
+  undoHighlightInRange(range);
 
   const toast = showToast("Chunkly：切分中…");
 
@@ -94,6 +99,7 @@ async function handleTrigger(): Promise<void> {
     setTimeout(() => t.remove(), 1200);
   }
 }
+
 
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.type === "CHUNKLY_TRIGGER") {

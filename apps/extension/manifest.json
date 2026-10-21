@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Chunkly",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "英文网页意群阅读辅助：LLM 驱动的意群切分与高亮标注",
   "permissions": [
     "storage",
@@ -38,13 +38,15 @@
   "commands": {
     "chunk-selection": {
       "suggested_key": {
-        "default": "Alt+Shift+C"
+        "default": "Ctrl+Shift+C",
+        "mac": "Command+Shift+C"
       },
       "description": "切分选中文本"
     },
     "undo-highlight": {
       "suggested_key": {
-        "default": "Alt+Shift+Z"
+        "default": "Ctrl+Shift+Z",
+        "mac": "Command+Shift+Z"
       },
       "description": "撤销 Chunkly 高亮"
     }

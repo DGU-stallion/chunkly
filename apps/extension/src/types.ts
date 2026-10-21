@@ -27,13 +27,35 @@ export const COMMANDCODE_PRESET: Pick<ProviderConfig, "baseURL" | "model"> = {
 };
 
 /**
- * 本机网关预设。默认指向 magpie 的 127.0.0.1:3425 与 commandcode-plan 的 deepseek-flash。
+ * 本机网关预设。
  * 注意：请求必须从 background service worker 发出（origin = chrome-extension://），
  * 从 content script 发出会带页面 origin，被网关以 permission_error 拒绝。见 background.ts。
  */
 export const LOCAL_PRESET: Pick<ProviderConfig, "baseURL" | "model"> = {
   baseURL: "http://127.0.0.1:3425/v1",
-  model: "commandcode-plan/deepseek/deepseek-v4.1-flash",
+  /**
+   * 实测（2026-10-21，本机网关）各模型中 claude-haiku-5-5 最快且稳定：
+   *   中位 1234ms / 3 次全可用 / 9 chunks / 5.8 词每意群（max 8）
+   * 对比（同一 340 字段落、同 prompt、各 3 次取中位）：
+   *   glm-5.3-flash      2458ms  7ch / 7.4w（偏粗）
+   *   z-ai/glm-5.3-flash 2628ms  8ch / 6.5w（偏粗）
+   *   gpt-6-luna         3788ms 11ch / 4.7w
+   *   deepseek-v4.1-flash 5070ms 13ch / 4w
+   * 注意：haiku 传 reasoning_effort=off 反而变慢（1234ms → 2847ms），
+   * 所以 local 预设的 effort 置空（见 PRESET_EFFORT）。
+   */
+  model: "commandcode-plan/claude-haiku-5-5",
+};
+
+/**
+ * 各预设推荐的推理强度。
+ * local 置空是因为实测 haiku 关 thinking 反而慢一倍，
+ * 而 commandcode 的 deepseek-v4.1-flash 关 thinking 确实减半。
+ */
+export const PRESET_EFFORT: Record<StoredSettings["presetId"], string> = {
+  commandcode: "off",
+  local: "",
+  custom: "",
 };
 
 /**

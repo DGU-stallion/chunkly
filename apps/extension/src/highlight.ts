@@ -185,17 +185,54 @@ function wrapPiece(node: Text, piece: Piece): void {
  * 因为 applyHighlight 从未删除过文本节点，这一步是真正无损的。
  */
 export function undoHighlight(container: ParentNode): void {
-  container.querySelectorAll(`.${HIGHLIGHT_CLASS_PREFIX}`).forEach((span) => {
-    const parent = span.parentNode;
-    if (!parent) return;
-    // 把子节点（原始文本节点）挪回原位，再丢掉空 span
-    while (span.firstChild) {
-      parent.insertBefore(span.firstChild, span);
-    }
-    parent.removeChild(span);
-  });
+  const spans = Array.from(
+    container.querySelectorAll<HTMLElement>(`.${HIGHLIGHT_CLASS_PREFIX}`)
+  );
+  if (spans.length === 0) return;
+
+  const parents = unwrapSpans(spans);
+  parents.forEach((p) => p.normalize());
 
   if (container instanceof Node) {
     container.normalize();
   }
+}
+
+/**
+ * 只撤销与给定 range 相交的高亮，保留页面上其他位置的高亮。
+ *
+ * 为什么需要它：切分第二段时不能清掉第一段。意群辅助的用法就是逐段读、
+ * 回头对，清空整页等于强迫用户只能看一段（这是用户的真实反馈）。
+ * 快捷键与右键菜单里的「清除高亮」仍用 undoHighlight(document.body) 整页清。
+ */
+export function undoHighlightInRange(range: Range): void {
+  const spans = Array.from(document.querySelectorAll<HTMLElement>(`.${HIGHLIGHT_CLASS_PREFIX}`)).filter(
+    (span) => range.intersectsNode(span)
+  );
+  if (spans.length === 0) return;
+
+  const parents = unwrapSpans(spans);
+  parents.forEach((p) => p.normalize());
+}
+
+/**
+ * 把 span 的子节点（原始文本节点）挪回原位并删掉空 span，返回受影响的父节点。
+ *
+ * 不在这里 normalize：同一父节点下多个 span 都拆完后只需合一次，
+ * 边拆边 normalize 会把后面还没处理的 span 里的节点搅乱。
+ */
+function unwrapSpans(spans: HTMLElement[]): Set<Node> {
+  const parents = new Set<Node>();
+
+  for (const span of spans) {
+    const parent = span.parentNode;
+    if (!parent) continue;
+    while (span.firstChild) {
+      parent.insertBefore(span.firstChild, span);
+    }
+    parent.removeChild(span);
+    parents.add(parent);
+  }
+
+  return parents;
 }

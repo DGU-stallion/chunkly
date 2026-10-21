@@ -21,7 +21,7 @@ describe("normalizeSettings", () => {
     expect(result.provider.baseURL).toBe("http://127.0.0.1:3425/v1");
     expect(result.provider.apiKey).toBe("magpie");
     // 模型以预设为准：用户手写的 "deepseek" 在网关侧不存在，会 404
-    expect(result.provider.model).toBe("commandcode-plan/deepseek/deepseek-v4.1-flash");
+    expect(result.provider.model).toBe("commandcode-plan/claude-haiku-5-5");
   });
 
   it("presetId 为 commandcode 时保留", () => {
