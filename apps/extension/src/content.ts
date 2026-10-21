@@ -1,20 +1,24 @@
 /**
- * Content script：捕获用户选中文本，调用 engine.chunk，按 offset 在 DOM 上高亮。
+ * Content script：捕获用户选中文本，交给 background 调 LLM，再按 offset 在 DOM 上高亮。
+ *
+ * 这里**不直接发网络请求**——请求在 background service worker 里发出，原因见 background.ts。
  */
-import { chunk, ChunkEngineError } from "@chunkly/engine";
-import { loadSettings } from "./storage.js";
-import { applyHighlight } from "./highlight.js";
+import type { Chunk } from "@chunkly/engine";
+import { applyHighlight, undoHighlight } from "./highlight.js";
+import type { ChunkResponseMessage } from "./types.js";
 
 const ERROR_HINT: Record<string, string> = {
+  NO_API_KEY: "Chunkly：尚未配置 API Key，请点击插件图标打开设置页完成配置",
   AUTH_FAILED: "Chunkly：API Key 无效，请到设置页检查配置",
   RATE_LIMITED: "Chunkly：触发速率限制，请稍后再试",
   TIMEOUT: "Chunkly：请求超时，请重试",
   SERVICE_UNAVAILABLE: "Chunkly：服务暂时不可用，请检查网络后重试",
   INVALID_RESPONSE: "Chunkly：切分结果解析失败，请重试",
-  NETWORK_ERROR: "Chunkly：网络错误，请检查网络后重试",
+  NETWORK_ERROR: "Chunkly：无法连接。若使用本地网关，请确认网关已启动",
 };
 
 const HIGHLIGHT_STYLE_ID = "chunkly-highlight-style";
+const TOAST_ID = "chunkly-toast";
 const PALETTE = ["#FDE68A", "#BFDBFE", "#C7F9CC", "#FBCFE8"];
 
 function ensureHighlightStyleInjected(): void {
@@ -26,8 +30,22 @@ function ensureHighlightStyleInjected(): void {
   style.textContent = [
     ".chunkly-chunk { border-radius: 3px; padding: 0 1px; }",
     ...PALETTE.map((color, i) => `.chunkly-chunk-${i} { background-color: ${color}; }`),
+    `#${TOAST_ID} { position: fixed; z-index: 2147483647; right: 16px; bottom: 16px;`,
+    "  padding: 8px 12px; border-radius: 6px; background: #111827; color: #fff;",
+    "  font: 13px/1.4 system-ui, sans-serif; box-shadow: 0 4px 14px rgba(0,0,0,.25); }",
   ].join("\n");
   document.head.appendChild(style);
+}
+
+/** 极简 loading / 错误提示，替代浏览器原生 alert（后者会阻塞页面且体验差）。 */
+function showToast(text: string): HTMLElement {
+  ensureHighlightStyleInjected();
+  document.getElementById(TOAST_ID)?.remove();
+  const el = document.createElement("div");
+  el.id = TOAST_ID;
+  el.textContent = text;
+  document.body.appendChild(el);
+  return el;
 }
 
 async function handleTrigger(): Promise<void> {
@@ -42,24 +60,39 @@ async function handleTrigger(): Promise<void> {
     return;
   }
 
+  const toast = showToast("Chunkly：切分中…");
+
+  // 再次切分前先收回上一次的高亮，避免 span 嵌套、也避免页面越改越乱。
+  undoHighlight(document.body);
+
+  let response: ChunkResponseMessage;
   try {
-    const settings = await loadSettings();
-    if (!settings.provider.apiKey) {
-      window.alert("Chunkly：尚未配置 API Key，请点击插件图标打开设置页完成配置");
-      return;
-    }
-    const result = await chunk(text, { provider: settings.provider });
-    ensureHighlightStyleInjected();
-    applyHighlight(range, text, result.chunks);
-  } catch (err) {
-    const code = err instanceof ChunkEngineError ? err.code : undefined;
-    const hint = code ? ERROR_HINT[code] : "Chunkly：发生未知错误";
-    window.alert(hint ?? "Chunkly：发生未知错误");
+    response = (await chrome.runtime.sendMessage({
+      type: "CHUNKLY_CHUNK",
+      text,
+    })) as ChunkResponseMessage;
+  } catch {
+    toast.textContent = "Chunkly：无法连接后台，请重新加载插件";
+    return;
   }
+
+  if (!response || !response.ok) {
+    const code = response?.error?.code;
+    toast.textContent = (code && ERROR_HINT[code]) ?? "Chunkly：发生未知错误";
+    return;
+  }
+
+  toast.remove();
+  const chunks: Chunk[] = response.chunks;
+  ensureHighlightStyleInjected();
+  applyHighlight(range, text, chunks);
 }
 
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.type === "CHUNKLY_TRIGGER") {
     void handleTrigger();
+  }
+  if (message?.type === "CHUNKLY_UNDO") {
+    undoHighlight(document.body);
   }
 });

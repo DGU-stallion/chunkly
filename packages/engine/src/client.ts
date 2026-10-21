@@ -15,7 +15,8 @@ export async function callChatCompletions(
   text: string,
   provider: ProviderConfig,
   promptOptions: PromptGranularity,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  reasoningEffort?: "off" | "low" | "medium" | "high"
 ): Promise<LlmCallResult> {
   const url = joinUrl(provider.baseURL, "/chat/completions");
 
@@ -28,11 +29,17 @@ export async function callChatCompletions(
     temperature: 0,
     response_format: { type: "json_object" },
   };
-  // GLM 系列模型默认开启深度思考（thinking），会导致简单任务也产生大量隐藏推理
-  // token、显著拖慢响应速度。`thinking` 是智谱专有扩展字段，非 GLM 的 OpenAI 兼容层
-  // （如 Gemini）会对未知字段做严格校验并直接拒绝整个请求（HTTP 400），因此只在
-  // baseURL 命中 GLM 官方域名时才附加这个字段。
-  if (isGlmProvider(provider.baseURL)) {
+
+  // 推理强度：切分是浅层句法任务，thinking 几乎不带来质量提升，却把延迟和 token 翻倍。
+  // 显式关掉是性价比最高的一项调优（实测 3974ms -> 1967ms，reasoning token 303 -> 0）。
+  // 不支持该参数的 Provider 会返回 400，调用方应只对自己确认过的 Provider 传值。
+  // 注意：各 Provider 取值不同。CommandCode 的 deepseek 支持 "off"；
+  // 而 GLM 只接受 low/medium/high，传 "off" 会 400。
+  if (reasoningEffort) {
+    requestBody.reasoning_effort = reasoningEffort;
+  } else if (isGlmProvider(provider.baseURL)) {
+    // 智谱官方域名用专有的 thinking 字段关思考（response_format 之外的非标准字段，
+    // 其他 Provider 会对未知字段严格校验并 400，所以只在 GLM 官方域名时附加）。
     requestBody.thinking = { type: "disabled" };
   }
 

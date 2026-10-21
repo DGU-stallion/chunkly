@@ -3,20 +3,50 @@
   "name": "Chunkly",
   "version": "0.1.0",
   "description": "英文网页意群阅读辅助：LLM 驱动的意群切分与高亮标注",
-  "permissions": ["storage", "activeTab", "contextMenus"],
-  "host_permissions": ["https://open.bigmodel.cn/*"],
-  "optional_host_permissions": ["<all_urls>"],
+  "permissions": [
+    "storage",
+    "activeTab",
+    "contextMenus",
+    "commands"
+  ],
+  "host_permissions": [
+    "https://api.commandcode.ai/*",
+    "https://open.bigmodel.cn/*",
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ],
+  "optional_host_permissions": [
+    "<all_urls>"
+  ],
   "background": {
     "service_worker": "background.js"
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["content.js"]
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ]
     }
   ],
   "options_page": "options.html",
   "action": {
     "default_title": "Chunkly"
+  },
+  "commands": {
+    "chunk-selection": {
+      "suggested_key": {
+        "default": "Alt+Shift+C"
+      },
+      "description": "切分选中文本"
+    },
+    "undo-highlight": {
+      "suggested_key": {
+        "default": "Alt+Shift+Z"
+      },
+      "description": "撤销 Chunkly 高亮"
+    }
   }
 }

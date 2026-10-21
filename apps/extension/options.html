@@ -20,13 +20,25 @@
     <h1>Chunkly 设置</h1>
 
     <div class="preset-row">
-      <label><input type="radio" name="preset" value="glm" /> 使用 GLM（智谱）</label>
-      <label><input type="radio" name="preset" value="custom" /> 自定义 Provider</label>
+      <label><input type="radio" name="preset" value="commandcode" /> CommandCode</label>
+      <label><input type="radio" name="preset" value="glm" /> GLM（智谱）</label>
+    </div>
+    <div class="preset-row">
+      <label><input type="radio" name="preset" value="local" /> 本地网关</label>
+      <label><input type="radio" name="preset" value="custom" /> 自定义</label>
     </div>
     <p class="hint">
-      GLM 预设已填好官方 API 地址与模型，仍需你自行在
+      <b>CommandCode（推荐）</b>：直连 <code>api.commandcode.ai/provider/v1</code>，用你的计划 key（<code>user_</code> 开头）。
+      自带额度、不限流，且支持 <code>reasoning_effort=off</code> 关掉 thinking（实测延迟从 3974ms 降到 1967ms，质量不变）。
+    </p>
+    <p class="hint">
+      GLM 预设已填好官方 API 地址与模型，需自行在
       <a href="https://bigmodel.cn" target="_blank" rel="noopener">bigmodel.cn</a>
-      申请 API Key 后填入下方；插件不内置任何可用密钥。
+      申请 Key；免费额度实测频繁 429。
+    </p>
+    <p class="hint">
+      本地网关预设指向 <code>http://127.0.0.1:3425/v1</code>（magpie）。请求由 background 发出，
+      网关会看到 <code>chrome-extension://</code> 而不是网页 origin。
     </p>
 
     <label for="baseURL">API Base URL</label>
@@ -36,7 +48,20 @@
     <input id="apiKey" type="password" placeholder="sk-..." />
 
     <label for="model">模型名称</label>
-    <input id="model" type="text" placeholder="glm-4.7-flash" />
+    <input id="model" type="text" placeholder="deepseek/deepseek-v4.1-flash" />
+
+    <label for="reasoningEffort">推理强度（reasoning_effort）</label>
+    <select id="reasoningEffort">
+      <option value="">不传（用 Provider 默认）</option>
+      <option value="off">off —— 关闭 thinking（推荐）</option>
+      <option value="low">low</option>
+      <option value="medium">medium</option>
+      <option value="high">high</option>
+    </select>
+    <p class="hint">
+      意群切分是浅层句法任务，开 thinking 不会让结果更好，但会把延迟和 token 翻倍。
+      注意 GLM 不支持 <code>off</code>（传了会 400），所以选 GLM 预设时此项自动置空。
+    </p>
 
     <button id="save">保存</button>
     <div id="status"></div>

@@ -23,8 +23,24 @@ export function normalizeSettings(raw: unknown): StoredSettings {
   if (!hasValidProvider) {
     return DEFAULT_SETTINGS;
   }
-  const presetId = candidate.presetId === "custom" ? "custom" : "glm";
-  return { presetId, provider: provider as StoredSettings["provider"] };
+  const presetId =
+    candidate.presetId === "custom"
+      ? "custom"
+      : candidate.presetId === "commandcode"
+        ? "commandcode"
+        : candidate.presetId === "local"
+          ? "local"
+          : "glm";
+  const effort = candidate.reasoningEffort;
+  const reasoningEffort =
+    effort === "off" || effort === "low" || effort === "medium" || effort === "high"
+      ? effort
+      : undefined;
+  return {
+    presetId,
+    provider: provider as StoredSettings["provider"],
+    ...(reasoningEffort ? { reasoningEffort } : {}),
+  };
 }
 
 export async function loadSettings(): Promise<StoredSettings> {

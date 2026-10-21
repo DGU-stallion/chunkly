@@ -11,7 +11,33 @@ describe("normalizeSettings", () => {
     expect(normalizeSettings(input)).toEqual(input);
   });
 
-  it("presetId 非 custom/glm 时回退为 glm", () => {
+  it("presetId 为 local 时保留（本机网关预设）", () => {
+    const input = {
+      presetId: "local",
+      provider: { baseURL: "http://127.0.0.1:3425/v1", apiKey: "magpie", model: "deepseek" },
+    };
+    expect(normalizeSettings(input)).toEqual(input);
+  });
+
+  it("presetId 为 commandcode 时保留", () => {
+    const input = {
+      presetId: "commandcode",
+      provider: {
+        baseURL: "https://api.commandcode.ai/provider/v1",
+        apiKey: "user_x",
+        model: "deepseek/deepseek-v4.1-flash",
+      },
+    };
+    expect(normalizeSettings(input)).toEqual(input);
+  });
+
+  it("合法的 reasoningEffort 保留，非法值丢弃", () => {
+    const base = { presetId: "commandcode", provider: { baseURL: "u", apiKey: "k", model: "m" } };
+    expect(normalizeSettings({ ...base, reasoningEffort: "off" }).reasoningEffort).toBe("off");
+    expect(normalizeSettings({ ...base, reasoningEffort: "nonsense" })).toEqual(base);
+  });
+
+  it("presetId 非 custom/local/commandcode/glm 时回退为 glm", () => {
     const input = {
       presetId: "weird",
       provider: { baseURL: "https://x", apiKey: "k", model: "m" },

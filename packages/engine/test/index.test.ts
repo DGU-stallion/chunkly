@@ -235,3 +235,202 @@ describe("thinking 字段仅对 GLM provider 附加", () => {
     expect(sentBody.thinking).toBeUndefined();
   });
 });
+
+describe("分段并发", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /** 造一段足够长的文本，含多句 */
+  function longText(sentenceCount: number): string {
+    return Array.from(
+      { length: sentenceCount },
+      (_, i) => `Sentence number ${i + 1} is here to make the text long enough for splitting.`
+    ).join(" ");
+  }
+
+  it("长文本会并发拆成多段，且结果拼起来等于原文", async () => {
+    const text = longText(12);
+    expect(text.length).toBeGreaterThan(600);
+
+    const calls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
+        const body = JSON.parse(init.body as string);
+        const userContent: string = body.messages[1].content;
+        const segmentText = userContent.replace(/^Split the following text:\n\n/, "");
+        calls.push(segmentText);
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            choices: [{ message: { content: JSON.stringify({ chunks: [segmentText] }) } }],
+            usage: { prompt_tokens: 100, completion_tokens: 20 },
+          }),
+          text: async () => "",
+        } as Response;
+      })
+    );
+
+    const result = await chunk(text, { provider });
+
+    expect(calls.length).toBeGreaterThan(1);
+    expect(result.meta.segmentCount).toBe(calls.length);
+    // 关键不变量：offset 精确 + 拼回等于原文
+    expect(result.chunks.map((c) => c.text).join("")).toBe(text);
+    for (const c of result.chunks) {
+      expect(text.slice(c.startOffset, c.endOffset)).toBe(c.text);
+    }
+    // usage 是各段合计
+    expect(result.meta.tokenUsage.prompt).toBe(100 * calls.length);
+    expect(result.meta.tokenUsage.completion).toBe(20 * calls.length);
+  });
+
+  it("短文本不并发，只发一次请求", async () => {
+    const text = "Reading in phrases is a good habit.";
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => openAiChatBody(JSON.stringify({ chunks: [text] })),
+      text: async () => "",
+    } as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await chunk(text, { provider });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.meta.segmentCount).toBe(1);
+  });
+
+  it("disableConcurrency 时即使长文本也只发一次请求", async () => {
+    const text = longText(12);
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => openAiChatBody(JSON.stringify({ chunks: [text] })),
+      text: async () => "",
+    } as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await chunk(text, { provider, disableConcurrency: true });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.meta.segmentCount).toBe(1);
+  });
+
+  it("某一段可重试失败后会重试并最终成功", async () => {
+    const text = longText(12);
+    let attempts = 0;
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
+        attempts++;
+        // 第一次调用返回 429，触发重试
+        if (attempts === 1) {
+          return {
+            ok: false,
+            status: 429,
+            json: async () => ({}),
+            text: async () => "rate limited",
+          } as Response;
+        }
+        const body = JSON.parse(init.body as string);
+        const segmentText: string = body.messages[1].content.replace(
+          /^Split the following text:\n\n/,
+          ""
+        );
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            choices: [{ message: { content: JSON.stringify({ chunks: [segmentText] }) } }],
+            usage: { prompt_tokens: 10, completion_tokens: 2 },
+          }),
+          text: async () => "",
+        } as Response;
+      })
+    );
+
+    const result = await chunk(text, { provider });
+    expect(attempts).toBeGreaterThan(1);
+    expect(result.chunks.map((c) => c.text).join("")).toBe(text);
+  });
+
+  it("段内不可重试错误（如 INVALID_RESPONSE）直接抛出，不做无意义重试", async () => {
+    const text = longText(12);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        json: async () => ({}),
+        text: async () => "bad request",
+      } as Response)
+    );
+
+    await expect(chunk(text, { provider })).rejects.toMatchObject({
+      code: "INVALID_RESPONSE",
+      retryable: false,
+    });
+  });
+});
+
+describe("并发对长文本的可靠性收益", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /**
+   * 回归测试：单次请求处理超长文本会因输出被 max_tokens 截断而失败
+   * （实测 12911 字符串行请求返回的 JSON 不合法）。
+   * 分段并发把输出也切开了，因此能成功。这里用 mock 模拟同样的截断行为。
+   */
+  it("超长文本单请求被截断时失败，分段并发则成功", async () => {
+    const text = Array.from(
+      { length: 90 },
+      (_, i) => `Sentence number ${i + 1} keeps the passage going for a while longer.`
+    ).join(" ");
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
+        const body = JSON.parse(init.body as string);
+        const segText: string = body.messages[1].content.replace(
+          /^Split the following text:\n\n/,
+          ""
+        );
+        // 模拟真实行为：输入过长时输出 JSON 被截断
+        if (segText.length > 4000) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              choices: [{ message: { content: '{"chunks": ["Sentence number 1 keeps' } }],
+              usage: { prompt_tokens: 1, completion_tokens: 1 },
+            }),
+            text: async () => "",
+          } as Response;
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            choices: [{ message: { content: JSON.stringify({ chunks: [segText] }) } }],
+            usage: { prompt_tokens: 1, completion_tokens: 1 },
+          }),
+          text: async () => "",
+        } as Response;
+      })
+    );
+
+    // 串行：整段一次性发，触发截断 -> INVALID_RESPONSE
+    await expect(chunk(text, { provider, disableConcurrency: true })).rejects.toMatchObject({
+      code: "INVALID_RESPONSE",
+    });
+
+    // 并发：拆成多段，每段都短于截断阈值 -> 成功且无损
+    const result = await chunk(text, { provider });
+    expect(result.meta.segmentCount).toBeGreaterThan(1);
+    expect(result.chunks.map((c) => c.text).join("")).toBe(text);
+  });
+});
