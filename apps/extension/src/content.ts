@@ -15,6 +15,9 @@ const ERROR_HINT: Record<string, string> = {
   RATE_LIMITED: "Chunkly：触发速率限制，请稍后再试",
   TIMEOUT: "Chunkly：请求超时，请重试",
   SERVICE_UNAVAILABLE: "Chunkly：服务暂时不可用，请检查网络后重试",
+  // 400 通常是模型不支持某个参数或模型名不对，不是"解析失败"。
+  // 笼统说成解析失败会把用户引向错误的排查方向。
+  BAD_REQUEST: "Chunkly：模型拒绝了请求参数，请在设置页换一个模型",
   INVALID_RESPONSE: "Chunkly：切分结果解析失败，请重试",
   NETWORK_ERROR: "Chunkly：无法连接。若使用本地网关，请确认网关已启动",
 };

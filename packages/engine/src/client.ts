@@ -142,6 +142,13 @@ function mapHttpError(status: number, bodyText: string): ChunkEngineError {
   if (status === 401 || status === 403) {
     return new ChunkEngineError("AUTH_FAILED", `鉴权失败 (HTTP ${status}): ${bodyText}`, false);
   }
+  // 400 单独成一类。实测最常见的两个原因是「模型不支持某个参数」
+  // （如 z-ai/glm-5.3-flash 收到 reasoning_effort="off" 会直接 400），
+  // 以及「模型名不存在」。这两种都不是「解析失败」，笼统报成
+  // INVALID_RESPONSE 会把排查方向彻底带偏——我本人就被这条提示误导过一轮。
+  if (status === 400) {
+    return new ChunkEngineError("BAD_REQUEST", `请求参数被拒绝 (HTTP 400): ${bodyText}`, false);
+  }
   if (status === 429) {
     return new ChunkEngineError("RATE_LIMITED", `触发速率限制 (HTTP ${status}): ${bodyText}`, true);
   }

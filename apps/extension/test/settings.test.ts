@@ -19,10 +19,10 @@ import {
  */
 
 describe("默认配置", () => {
-  it("默认走官方端点，模型是最快的 deepseek", () => {
+  it("默认走官方端点，模型是 glm-5.3-flash（按用户指定）", () => {
     expect(DEFAULT_SETTINGS.mode).toBe("official");
     expect(DEFAULT_SETTINGS.provider.baseURL).toBe(OFFICIAL_BASE_URL);
-    expect(DEFAULT_SETTINGS.provider.model).toBe("deepseek/deepseek-v4.1-flash");
+    expect(DEFAULT_SETTINGS.provider.model).toBe("z-ai/glm-5.3-flash");
   });
 
   it("默认不内置任何密钥", () => {
@@ -31,11 +31,11 @@ describe("默认配置", () => {
 
   it("官方可选模型正好是用户指定的三个", () => {
     expect(OFFICIAL_MODELS.map((m) => m.id)).toEqual([
-      "deepseek/deepseek-v4.1-flash",
       "z-ai/glm-5.3-flash",
+      "deepseek/deepseek-v4.1-flash",
       "gpt-5.6-luna",
     ]);
-    expect(DEFAULT_OFFICIAL_MODEL).toBe("deepseek/deepseek-v4.1-flash");
+    expect(DEFAULT_OFFICIAL_MODEL).toBe("z-ai/glm-5.3-flash");
   });
 
   it("isOfficialModel 认三个官方模型，不认其他", () => {
@@ -186,11 +186,11 @@ describe("推理强度按模型写死（不暴露给用户）", () => {
     expect(effortForModel("deepseek/deepseek-v4.1-flash")).toBe("off");
   });
 
-  it("glm 配 low（它不支持 off，传 off 会 400）", () => {
+  it("glm 配 low（它不支持 off，传 off 会 400 并报 does not support reasoning_effort）", () => {
     expect(effortForModel("z-ai/glm-5.3-flash")).toBe("low");
   });
 
-  it("gpt-5.6-luna 配 low", () => {
+  it("luna 也配 low（同样不接受 off）", () => {
     expect(effortForModel("gpt-5.6-luna")).toBe("low");
   });
 

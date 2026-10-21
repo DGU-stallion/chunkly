@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Chunkly",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "英文网页意群阅读辅助：LLM 驱动的意群切分与高亮标注",
   "permissions": [
     "storage",

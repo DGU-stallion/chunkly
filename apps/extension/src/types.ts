@@ -28,32 +28,34 @@ export const OFFICIAL_BASE_URL = "https://api.commandcode.ai/provider/v1";
  */
 export const OFFICIAL_MODELS = [
   {
-    id: "deepseek/deepseek-v4.1-flash",
-    label: "DeepSeek V4.1 Flash",
-    note: "最快（约 2.3s）。切分更细，约 3–4 词/意群",
-    /** 该模型接受 off，且关掉 thinking 后 2340ms（low 要 5996ms） */
-    effort: "off",
-  },
-  {
     id: "z-ai/glm-5.3-flash",
     label: "GLM-5.3 Flash",
-    note: "切分偏粗，约 5 词/意群",
-    /** 不支持 off（会 400），low 已是无 reasoning 的最快档 */
+    note: "默认",
+    /**
+     * 不支持 off —— 传 off 会 HTTP 400
+     * `Model "z-ai/glm-5.3-flash" does not support reasoning_effort`
+     * low 已被服务端视作无 reasoning（实测 reasoning_tokens=0）。
+     */
     effort: "low",
+  },
+  {
+    id: "deepseek/deepseek-v4.1-flash",
+    label: "DeepSeek V4.1 Flash",
+    note: "切分更细，约 3–4 词/意群",
+    /** 三个模型里唯一明确接受 off 的 */
+    effort: "off",
   },
   {
     id: "gpt-5.6-luna",
     label: "GPT-5.6 Luna",
     note: "粒度居中，约 4 词/意群",
+    /** 同 glm，不支持 off */
     effort: "low",
   },
 ] as const;
 
-/**
- * 默认模型。选 deepseek 是因为它最快（2.3s vs glm 4.8s / luna 4.3s）
- * 且切分粒度最接近意群阅读的推荐值（3–4 词）。
- */
-export const DEFAULT_OFFICIAL_MODEL: OfficialModelId = "deepseek/deepseek-v4.1-flash";
+/** 默认模型：按用户指定，glm-5.3-flash */
+export const DEFAULT_OFFICIAL_MODEL: OfficialModelId = "z-ai/glm-5.3-flash";
 
 /** 取某个模型对应的最优 reasoning_effort；未知模型返回 undefined（不传）。 */
 export function effortForModel(model: string): string | undefined {

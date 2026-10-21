@@ -126,10 +126,12 @@ describe("chunk 错误分类", () => {
     expect(err.code).toBe("SERVICE_UNAVAILABLE");
   });
 
-  it("其他非 2xx 状态码（如 400）-> INVALID_RESPONSE，不可重试", async () => {
+  it("400 -> BAD_REQUEST，不可重试（不是解析失败）", async () => {
+    // 400 实测最常见的成因是「模型不支持某个参数」（如 glm 收到 reasoning_effort=off），
+    // 报成 INVALID_RESPONSE 会把用户引去查解析器，方向完全错。
     mockFetchOnce({ ok: false, status: 400, textBody: "bad request" });
     const err = await chunk("text", { provider }).catch((e) => e);
-    expect(err.code).toBe("INVALID_RESPONSE");
+    expect(err.code).toBe("BAD_REQUEST");
     expect(err.retryable).toBe(false);
   });
 
@@ -356,7 +358,7 @@ describe("分段并发", () => {
     expect(result.chunks.map((c) => c.text).join("")).toBe(text);
   });
 
-  it("段内不可重试错误（如 INVALID_RESPONSE）直接抛出，不做无意义重试", async () => {
+  it("段内不可重试错误（如 BAD_REQUEST）直接抛出，不做无意义重试", async () => {
     const text = longText(12);
     vi.stubGlobal(
       "fetch",
@@ -369,7 +371,7 @@ describe("分段并发", () => {
     );
 
     await expect(chunk(text, { provider })).rejects.toMatchObject({
-      code: "INVALID_RESPONSE",
+      code: "BAD_REQUEST",
       retryable: false,
     });
   });

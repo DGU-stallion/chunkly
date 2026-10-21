@@ -32,6 +32,7 @@ export interface Chunk {
 
 export type ErrorCode =
   | "AUTH_FAILED"
+  | "BAD_REQUEST"
   | "RATE_LIMITED"
   | "TIMEOUT"
   | "SERVICE_UNAVAILABLE"
