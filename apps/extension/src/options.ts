@@ -1,60 +1,101 @@
 /**
  * Options 设置页逻辑。
  *
- * 设计上有一个明确的教训驱动：
- * 旧版把默认预设设成 GLM，用户粘上 CommandCode 的 key 后存下的是智谱地址，
- * 401 却被提示成「API Key 无效」——**key 是对的，报错误导**。
- * 所以这一版做三件事：
- *   1. 默认预设就是唯一开箱可用的那个（CommandCode），不做无意义的选择；
- *   2. 加了「测试连接」，配置错误在设置页当场发现，而不是等切分时才 401；
- *   3. 错误提示指向真正要检查的东西（地址与 key 是否同一家）。
+ * 两个分支：official（选模型即可）与 custom（全部自己填）。
+ *
+ * 一条贯穿本文件的原则：**用户显式选过的东西必须活下来。**
+ * 之前这里出过 bug——保存时把用户选的模型写进存储了，但重新打开设置页时
+ * normalizeSettings 用预设值覆盖了它，表现为「改了模型但保存不了」。
+ * 现在的分工是：端点由模式决定，模型和 Key 尊重用户。
  */
 import { loadSettings, saveSettings } from "./storage.js";
-import { DEFAULT_SETTINGS, PRESETS, PRESET_EFFORT, type StoredSettings } from "./types.js";
-
-type PresetId = StoredSettings["presetId"];
+import {
+  DEFAULT_OFFICIAL_MODEL,
+  OFFICIAL_BASE_URL,
+  OFFICIAL_MODELS,
+  isOfficialModel,
+  type StoredSettings,
+} from "./types.js";
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
-const baseURLInput = $<HTMLInputElement>("baseURL");
+const modeRadios = document.querySelectorAll<HTMLInputElement>('input[name="mode"]');
+const officialPane = $<HTMLDivElement>("officialPane");
+const customPane = $<HTMLDivElement>("customPane");
+const modelList = $<HTMLDivElement>("modelList");
 const apiKeyInput = $<HTMLInputElement>("apiKey");
-const modelInput = $<HTMLInputElement>("model");
-const effortSelect = $<HTMLSelectElement>("reasoningEffort");
-const keyHelp = $<HTMLParagraphElement>("keyHelp");
+const customBaseURLInput = $<HTMLInputElement>("customBaseURL");
+const customApiKeyInput = $<HTMLInputElement>("customApiKey");
+const customModelInput = $<HTMLInputElement>("customModel");
 const statusEl = $<HTMLDivElement>("status");
+const bannerEl = $<HTMLDivElement>("banner");
+const bannerText = $<HTMLSpanElement>("bannerText");
 const saveButton = $<HTMLButtonElement>("save");
 const testButton = $<HTMLButtonElement>("test");
-const toggleKeyButton = $<HTMLButtonElement>("toggleKey");
-const radios = document.querySelectorAll<HTMLInputElement>('input[name="preset"]');
+const hotkeyEl = $<HTMLElement>("hotkey");
 
-const KEY_HELP: Record<PresetId, string> = {
-  commandcode: "在 CommandCode 计划里生成的 key，以 <code>user_</code> 开头，共 93 个字符。",
-  local: "本机网关（magpie）不校验 key，随便填即可。",
-  custom: "填该服务商签发的 key。",
-};
+type Mode = StoredSettings["mode"];
 
-function getSelectedPreset(): PresetId {
-  const checked = document.querySelector<HTMLInputElement>('input[name="preset"]:checked');
-  const value = checked?.value;
-  return value === "local" || value === "custom" ? value : "commandcode";
+function currentMode(): Mode {
+  const checked = document.querySelector<HTMLInputElement>('input[name="mode"]:checked');
+  return checked?.value === "custom" ? "custom" : "official";
 }
 
-function setSelectedPreset(presetId: PresetId): void {
-  radios.forEach((radio) => {
-    radio.checked = radio.value === presetId;
+function setMode(mode: Mode): void {
+  modeRadios.forEach((r) => {
+    r.checked = r.value === mode;
   });
+  officialPane.classList.toggle("hidden", mode !== "official");
+  customPane.classList.toggle("hidden", mode !== "custom");
+  setStatus("", "");
+  hideBanner();
 }
 
-/** 切换预设时把地址/模型/推理强度换成该预设的默认值（apiKey 保留，用户不必重填）。 */
-function applyPresetDefaults(presetId: PresetId): void {
-  if (presetId !== "custom") {
-    const preset = PRESETS[presetId];
-    baseURLInput.value = preset.baseURL;
-    modelInput.value = preset.model;
+/** 渲染模型单选项。用卡片而不是 <select>：模型说明对用户有决策价值。 */
+function renderModels(selected: string): void {
+  modelList.replaceChildren();
+
+  const chosen = isOfficialModel(selected) ? selected : DEFAULT_OFFICIAL_MODEL;
+
+  for (const model of OFFICIAL_MODELS) {
+    const label = document.createElement("label");
+    label.className = "model";
+
+    const input = document.createElement("input");
+    input.type = "radio";
+    input.name = "model";
+    input.value = model.id;
+    input.checked = model.id === chosen;
+
+    const dot = document.createElement("span");
+    dot.className = "dot";
+
+    const body = document.createElement("span");
+    body.className = "body";
+
+    const name = document.createElement("span");
+    name.className = "name";
+    name.textContent = model.label;
+    if (model.id === DEFAULT_OFFICIAL_MODEL) {
+      const badge = document.createElement("span");
+      badge.className = "badge";
+      badge.textContent = "默认";
+      name.appendChild(badge);
+    }
+
+    const note = document.createElement("span");
+    note.className = "note";
+    note.textContent = model.note;
+
+    body.append(name, note);
+    label.append(input, dot, body);
+    modelList.appendChild(label);
   }
-  effortSelect.value = PRESET_EFFORT[presetId];
-  keyHelp.innerHTML = KEY_HELP[presetId];
-  setStatus("", "");
+}
+
+function selectedModel(): string {
+  const checked = document.querySelector<HTMLInputElement>('input[name="model"]:checked');
+  return checked?.value ?? DEFAULT_OFFICIAL_MODEL;
 }
 
 function setStatus(text: string, kind: "" | "ok" | "warn" | "err"): void {
@@ -62,111 +103,155 @@ function setStatus(text: string, kind: "" | "ok" | "warn" | "err"): void {
   statusEl.className = `status ${kind}`.trim();
 }
 
-async function init(): Promise<void> {
-  const settings = await loadSettings();
-  setSelectedPreset(settings.presetId);
-  baseURLInput.value =
-    settings.provider.baseURL || PRESETS[settings.presetId as keyof typeof PRESETS]?.baseURL || "";
-  modelInput.value =
-    settings.provider.model || PRESETS[settings.presetId as keyof typeof PRESETS]?.model || "";
-  apiKeyInput.value = settings.provider.apiKey;
-  effortSelect.value = settings.reasoningEffort ?? DEFAULT_SETTINGS.reasoningEffort ?? "";
-  keyHelp.innerHTML = KEY_HELP[settings.presetId];
+function showBanner(text: string, kind: "warn" | "err" | "ok"): void {
+  bannerText.textContent = text;
+  bannerEl.className = `banner ${kind}`;
+}
 
-  // 首次使用（没有 key）时把焦点放到 key 上，省一步点击
-  if (!settings.provider.apiKey) apiKeyInput.focus();
+function hideBanner(): void {
+  bannerEl.className = "banner err hidden";
+}
+
+/** 根据平台显示快捷键（mac 显示 ⌘⇧C，其他显示 Ctrl+Shift+C） */
+function renderHotkey(): void {
+  const isMac = navigator.platform.toLowerCase().includes("mac");
+  hotkeyEl.textContent = isMac ? "⌘⇧C" : "Ctrl+Shift+C";
+}
+
+async function init(): Promise<void> {
+  renderHotkey();
+
+  const settings = await loadSettings();
+  setMode(settings.mode);
+
+  apiKeyInput.value = settings.mode === "official" ? settings.provider.apiKey : "";
+  renderModels(settings.provider.model);
+
+  if (settings.mode === "custom") {
+    customBaseURLInput.value = settings.provider.baseURL;
+    customApiKeyInput.value = settings.provider.apiKey;
+    customModelInput.value = settings.provider.model;
+  }
+
+  // 官方模式但没有 Key 时，直接把焦点放到 Key 上，省一次点击
+  if (settings.mode === "official" && !settings.provider.apiKey) {
+    apiKeyInput.focus();
+  }
 }
 
 function collectSettings(): StoredSettings {
-  const presetId = getSelectedPreset();
-  const effortRaw = effortSelect.value;
-  const reasoningEffort =
-    effortRaw === "off" || effortRaw === "low" || effortRaw === "medium" || effortRaw === "high"
-      ? effortRaw
-      : undefined;
+  const mode = currentMode();
+
+  if (mode === "official") {
+    return {
+      mode,
+      provider: {
+        // 官方端点固定，不让用户为了改模型而误改地址
+        baseURL: OFFICIAL_BASE_URL,
+        apiKey: apiKeyInput.value.trim(),
+        // 尊重用户选的模型（这是之前保存不上的那个 bug）
+        model: selectedModel(),
+      },
+    };
+  }
 
   return {
-    presetId,
+    mode,
     provider: {
-      baseURL: baseURLInput.value.trim(),
-      apiKey: apiKeyInput.value.trim(),
-      model: modelInput.value.trim(),
+      baseURL: customBaseURLInput.value.trim(),
+      apiKey: customApiKeyInput.value.trim(),
+      model: customModelInput.value.trim(),
     },
-    ...(reasoningEffort ? { reasoningEffort } : {}),
   };
 }
 
-radios.forEach((radio) => {
-  radio.addEventListener("change", () => applyPresetDefaults(getSelectedPreset()));
+/** 校验并返回错误信息，通过则返回 null */
+function validate(settings: StoredSettings): string | null {
+  const { baseURL, apiKey, model } = settings.provider;
+
+  if (!apiKey) {
+    return settings.mode === "official" ? "请先填写 API Key" : "请填写 API Key";
+  }
+  if (!baseURL) return "请填写 API 地址";
+  if (!model) return "请选择或填写模型";
+
+  if (settings.mode === "custom") {
+    try {
+      new URL(baseURL);
+    } catch {
+      return "API 地址不是合法 URL，应形如 https://api.example.com/v1";
+    }
+  }
+  return null;
+}
+
+modeRadios.forEach((radio) => {
+  radio.addEventListener("change", () => setMode(currentMode()));
 });
 
-toggleKeyButton.addEventListener("click", () => {
-  const showing = apiKeyInput.type === "text";
-  apiKeyInput.type = showing ? "password" : "text";
-  toggleKeyButton.textContent = showing ? "显示" : "隐藏";
+$<HTMLButtonElement>("toggleKey").addEventListener("click", () => {
+  togglePassword(apiKeyInput, $<HTMLButtonElement>("toggleKey"));
 });
+
+$<HTMLButtonElement>("toggleCustomKey").addEventListener("click", () => {
+  togglePassword(customApiKeyInput, $<HTMLButtonElement>("toggleCustomKey"));
+});
+
+function togglePassword(input: HTMLInputElement, button: HTMLButtonElement): void {
+  const showing = input.type === "text";
+  input.type = showing ? "password" : "text";
+  button.textContent = showing ? "显示" : "隐藏";
+}
 
 saveButton.addEventListener("click", () => void handleSave());
 
 async function handleSave(): Promise<void> {
   const settings = collectSettings();
-
-  if (!settings.provider.apiKey) {
-    setStatus("请先填写 API Key", "err");
-    apiKeyInput.focus();
-    return;
-  }
-  if (!settings.provider.baseURL || !settings.provider.model) {
-    setStatus("API 地址和模型不能为空", "err");
+  const error = validate(settings);
+  if (error) {
+    setStatus(error, "err");
     return;
   }
 
   await saveSettings(settings);
 
-  // 任意自定义域名需要运行时申请权限；内置预设已在 manifest 声明过
-  if (settings.presetId === "custom") {
+  // 自定义域名需要运行时申请权限；官方端点已在 manifest 声明过
+  if (settings.mode === "custom") {
     try {
       const origin = new URL(settings.provider.baseURL).origin + "/*";
       chrome.runtime.sendMessage({ type: "REQUEST_HOST_PERMISSION", origin });
     } catch {
-      // baseURL 不是合法 URL 时跳过权限申请，保存本身仍然成功
+      // URL 非法时跳过权限申请；validate 已经拦过这种情况
     }
   }
 
   setStatus("已保存", "ok");
+  hideBanner();
 }
 
-/**
- * 连通性测试：直接打一次最小的 /chat/completions。
- *
- * 为什么值得专门做一个按钮：配置错误的默认表现是「切分时弹出 401」，
- * 而那时用户已经离开设置页、也不确定是 key 错还是地址错。
- * 在这里当场测出结果，错误信息能直接指向原因。
- */
 testButton.addEventListener("click", () => void handleTest());
 
+/**
+ * 连通性测试：打一次最小的 /chat/completions。
+ *
+ * 值得单独做一个按钮，因为配置错误默认会表现为「切分时弹出 401」，
+ * 那时用户已经离开设置页，也不确定是 Key 错还是地址错。
+ */
 async function handleTest(): Promise<void> {
   const settings = collectSettings();
-
-  if (!settings.provider.apiKey) {
-    setStatus("请先填写 API Key", "err");
+  const error = validate(settings);
+  if (error) {
+    setStatus(error, "err");
     return;
   }
 
   testButton.disabled = true;
   saveButton.disabled = true;
   setStatus("测试中…", "");
+  hideBanner();
 
   const startedAt = Date.now();
   try {
-    const body: Record<string, unknown> = {
-      model: settings.provider.model,
-      messages: [{ role: "user", content: "hi" }],
-      max_tokens: 1,
-      temperature: 0,
-    };
-    if (settings.reasoningEffort) body.reasoning_effort = settings.reasoningEffort;
-
     const response = await fetch(
       settings.provider.baseURL.replace(/\/+$/, "") + "/chat/completions",
       {
@@ -175,7 +260,14 @@ async function handleTest(): Promise<void> {
           "Content-Type": "application/json",
           Authorization: `Bearer ${settings.provider.apiKey}`,
         },
-        body: JSON.stringify(body),
+        // 不传推理相关参数：各模型走自己的默认（实测这个取舍因模型而异，
+        // 统一不设比设一个"看起来更快"的值更靠谱）
+        body: JSON.stringify({
+          model: settings.provider.model,
+          messages: [{ role: "user", content: "hi" }],
+          max_tokens: 4,
+          temperature: 0,
+        }),
       }
     );
 
@@ -187,10 +279,14 @@ async function handleTest(): Promise<void> {
       return;
     }
 
-    setStatus(describeFailure(response.status, text, settings.provider.baseURL), "err");
+    const detail = describeFailure(response.status, text, settings.provider.baseURL);
+    setStatus(detail, "err");
+    showBanner(detail, "err");
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    setStatus(`无法连接：${message}`, "err");
+    const detail = `无法连接：${message}`;
+    setStatus(detail, "err");
+    showBanner(detail, "err");
   } finally {
     testButton.disabled = false;
     saveButton.disabled = false;
@@ -200,26 +296,27 @@ async function handleTest(): Promise<void> {
 /**
  * 把 HTTP 失败翻译成「用户该去改什么」。
  *
- * 关键是 401/403：它**通常不是 key 本身无效**，而是 key 与地址不属于同一服务。
- * 直接说「Key 无效」会把用户引向错误的排查方向（我本人就被这条提示误导过）。
+ * 401 通常**不是 Key 本身无效**，而是 Key 与地址不属于同一家服务。
+ * 直接说「Key 无效」会把用户引向错误的排查方向（我自己就被这条提示误导过）。
  */
 function describeFailure(status: number, bodyText: string, baseURL: string): string {
-  const snippet = bodyText.slice(0, 160).replace(/\s+/g, " ").trim();
+  const snippet = bodyText.slice(0, 140).replace(/\s+/g, " ").trim();
   const host = safeHost(baseURL);
+  const tail = snippet ? ` 详情：${snippet}` : "";
 
   if (status === 401 || status === 403) {
-    return `鉴权失败（${status}）。请确认这个 Key 属于 ${host} —— Key 与地址必须来自同一家服务。${snippet ? " 详情：" + snippet : ""}`;
+    return `鉴权失败（${status}）。请确认这个 Key 属于 ${host} —— Key 与地址必须来自同一家服务。${tail}`;
   }
   if (status === 404) {
-    return `地址不存在（404）。检查 API 地址是否漏了路径，例如应形如 …/provider/v1。${snippet ? " 详情：" + snippet : ""}`;
+    return `地址不存在（404）。检查 API 地址是否漏了路径，例如应形如 …/provider/v1。${tail}`;
   }
   if (status === 429) {
-    return `触发限流（429）。稍后再试，或换一个服务。${snippet ? " 详情：" + snippet : ""}`;
+    return `触发限流（429）。稍后再试。${tail}`;
   }
   if (status >= 500) {
-    return `服务端错误（${status}）。不是你的配置问题，稍后重试。${snippet ? " 详情：" + snippet : ""}`;
+    return `服务端错误（${status}）。不是你的配置问题，稍后重试。${tail}`;
   }
-  return `请求失败（${status}）。${snippet}`;
+  return `请求失败（${status}）。${tail}`;
 }
 
 function safeHost(url: string): string {

@@ -85,7 +85,6 @@ async function handleChunk(message: ChunkRequestMessage): Promise<ChunkResponseM
       text: message.text,
       baseURL: settings.provider.baseURL,
       model: settings.provider.model,
-      reasoningEffort: settings.reasoningEffort,
     });
 
     const hit = cache.get(cacheKey);
@@ -93,9 +92,10 @@ async function handleChunk(message: ChunkRequestMessage): Promise<ChunkResponseM
       return { ok: true, chunks: hit, cached: true };
     }
 
+    // 不传 reasoningEffort：这个取舍因模型而异（deepseek 关掉快一倍，
+    // haiku 关掉反而慢一倍），统一不设、让各模型走自己的默认更靠谱。
     const result = await chunk(message.text, {
       provider: settings.provider,
-      reasoningEffort: settings.reasoningEffort,
     });
 
     const chunks = result.chunks.map((c) => ({

@@ -1,121 +1,181 @@
 import { describe, it, expect } from "vitest";
 import { normalizeSettings } from "../src/storage.js";
-import { DEFAULT_SETTINGS, PRESETS } from "../src/types.js";
+import {
+  DEFAULT_SETTINGS,
+  OFFICIAL_BASE_URL,
+  OFFICIAL_MODELS,
+  DEFAULT_OFFICIAL_MODEL,
+  isOfficialModel,
+} from "../src/types.js";
 
 /**
- * 设置模型的契约。
+ * 设置的契约。
  *
- * 背景（一个真实的坑）：早期默认 presetId 是 "glm"，而设置页在字段为空时
- * 又兜底到 DEFAULT_SETTINGS（GLM 的地址与模型）。用户把 CommandCode 的
- * `user_...` key 粘进去，实际存下的却是 open.bigmodel.cn —— 智谱不认这个 key，
- * 返回 401，界面显示「API Key 无效」。
- *
- * 也就是说：**key 是对的，报错误导。** 默认值必须与唯一的真实用途一致，
- * 且只剩一个 provider 时不该让用户做选择。
+ * 这组测试里最重要的一条是「用户改的模型必须能保存住」——
+ * 它来自一个真实 bug：我为了修 401 加了「预设说了算」，让非 custom 模式
+ * 一律用预设值覆盖存储值，结果用户把模型改成 glm，保存后重开设置页又被改回
+ * deepseek，表现为「改了模型但保存不了」。
  */
 
-describe("设置默认值", () => {
-  it("默认 provider 是 CommandCode（唯一的真实用途）", () => {
-    expect(DEFAULT_SETTINGS.provider.baseURL).toBe("https://api.commandcode.ai/provider/v1");
-    expect(DEFAULT_SETTINGS.provider.model).toBe("deepseek/deepseek-v4.1-flash");
+describe("默认配置", () => {
+  it("默认走官方端点，模型是 glm-5.3-flash", () => {
+    expect(DEFAULT_SETTINGS.mode).toBe("official");
+    expect(DEFAULT_SETTINGS.provider.baseURL).toBe(OFFICIAL_BASE_URL);
+    expect(DEFAULT_SETTINGS.provider.model).toBe("z-ai/glm-5.3-flash");
   });
 
-  it("默认关掉 thinking（切分是浅层句法任务，开了只是变慢）", () => {
-    expect(DEFAULT_SETTINGS.reasoningEffort).toBe("off");
-  });
-
-  it("GLM 已删除，只留 CommandCode 与本机网关", () => {
-    expect(Object.keys(PRESETS)).toEqual(["commandcode", "local"]);
-    expect(PRESETS.commandcode.baseURL).toBe("https://api.commandcode.ai/provider/v1");
-    expect("glm" in PRESETS).toBe(false);
-  });
-
-  it("默认 apiKey 为空（绝不内置密钥）", () => {
+  it("默认不内置任何密钥", () => {
     expect(DEFAULT_SETTINGS.provider.apiKey).toBe("");
+  });
+
+  it("官方可选模型正好是用户指定的三个", () => {
+    expect(OFFICIAL_MODELS.map((m) => m.id)).toEqual([
+      "z-ai/glm-5.3-flash",
+      "deepseek/deepseek-v4.1-flash",
+      "gpt-5.6-luna",
+    ]);
+    expect(DEFAULT_OFFICIAL_MODEL).toBe("z-ai/glm-5.3-flash");
+  });
+
+  it("isOfficialModel 认三个官方模型，不认其他", () => {
+    for (const m of OFFICIAL_MODELS) expect(isOfficialModel(m.id)).toBe(true);
+    expect(isOfficialModel("claude-haiku-5-5")).toBe(false);
+    expect(isOfficialModel("")).toBe(false);
+  });
+
+  it("不再暴露本地网关的概念", () => {
+    // 对外发布的插件不该让用户配 127.0.0.1
+    expect(JSON.stringify(DEFAULT_SETTINGS)).not.toContain("127.0.0.1");
+    expect(JSON.stringify(OFFICIAL_MODELS)).not.toContain("127.0.0.1");
+  });
+});
+
+describe("用户的模型选择必须能保存住（回归：改了模型但保存不了）", () => {
+  it("official 模式下用户选的 glm 模型，重读后仍是 glm", () => {
+    const saved = {
+      mode: "official",
+      provider: { baseURL: OFFICIAL_BASE_URL, apiKey: "user_x", model: "z-ai/glm-5.3-flash" },
+    };
+
+    const reread = normalizeSettings(saved);
+
+    expect(reread.provider.model).toBe("z-ai/glm-5.3-flash");
+    expect(reread.provider.apiKey).toBe("user_x");
+  });
+
+  it("三个官方模型都能存住，不会被改回默认", () => {
+    for (const m of OFFICIAL_MODELS) {
+      const saved = {
+        mode: "official",
+        provider: { baseURL: OFFICIAL_BASE_URL, apiKey: "k", model: m.id },
+      };
+      expect(normalizeSettings(saved).provider.model).toBe(m.id);
+    }
+  });
+
+  it("官方模式下地址被固定为官方地址（残留地址不会导致 401）", () => {
+    const stale = {
+      mode: "official",
+      provider: {
+        baseURL: "https://open.bigmodel.cn/api/paas/v4/",
+        apiKey: "user_x",
+        model: "z-ai/glm-5.3-flash",
+      },
+    };
+
+    const fixed = normalizeSettings(stale);
+
+    expect(fixed.provider.baseURL).toBe(OFFICIAL_BASE_URL);
+    // 模型仍然尊重用户选择，不被端点修正波及
+    expect(fixed.provider.model).toBe("z-ai/glm-5.3-flash");
+  });
+
+  it("模型为空时才回落到默认", () => {
+    const empty = {
+      mode: "official",
+      provider: { baseURL: OFFICIAL_BASE_URL, apiKey: "k", model: "" },
+    };
+    expect(normalizeSettings(empty).provider.model).toBe(DEFAULT_OFFICIAL_MODEL);
+  });
+});
+
+describe("自定义模式", () => {
+  it("三项完全尊重用户填写", () => {
+    const custom = {
+      mode: "custom",
+      provider: { baseURL: "https://api.openai.com/v1", apiKey: "sk-x", model: "gpt-4o-mini" },
+    };
+    expect(normalizeSettings(custom)).toEqual(custom);
+  });
+
+  it("自定义模式下也可以用非官方模型名", () => {
+    const custom = {
+      mode: "custom",
+      provider: { baseURL: "http://x/v1", apiKey: "k", model: "任意模型名" },
+    };
+    expect(normalizeSettings(custom).provider.model).toBe("任意模型名");
   });
 });
 
 describe("旧配置迁移", () => {
-  it("旧的 glm 配置迁移为 CommandCode（否则用户升级后仍然 401）", () => {
-    const oldGlm = {
-      presetId: "glm",
-      provider: { baseURL: "https://open.bigmodel.cn/api/paas/v4/", apiKey: "user_abc", model: "glm-4.7-flash" },
-    };
-
-    const migrated = normalizeSettings(oldGlm);
-
-    expect(migrated.presetId).toBe("commandcode");
-    expect(migrated.provider.baseURL).toBe("https://api.commandcode.ai/provider/v1");
-    // key 要保留：用户已经填过的东西不能丢
-    expect(migrated.provider.apiKey).toBe("user_abc");
-    // 模型换成 CommandCode 的，否则模型名在那边不存在
-    expect(migrated.provider.model).toBe("deepseek/deepseek-v4.1-flash");
-  });
-
-  it("其他非法 presetId 也迁移为 CommandCode", () => {
-    const weird = {
-      presetId: "weird",
-      provider: { baseURL: "https://open.bigmodel.cn/api/paas/v4/", apiKey: "k", model: "m" },
-    };
-    const migrated = normalizeSettings(weird);
-    expect(migrated.presetId).toBe("commandcode");
-    expect(migrated.provider.baseURL).toBe("https://api.commandcode.ai/provider/v1");
-  });
-
-  it("已是 CommandCode 的配置原样保留", () => {
-    const good = {
+  it("旧的 commandcode 迁移为 official，key 保留", () => {
+    const old = {
       presetId: "commandcode",
-      provider: {
-        baseURL: "https://api.commandcode.ai/provider/v1",
-        apiKey: "user_abc",
-        model: "deepseek/deepseek-v4.1-flash",
-      },
-      reasoningEffort: "off",
+      provider: { baseURL: OFFICIAL_BASE_URL, apiKey: "user_abc", model: "deepseek/deepseek-v4.1-flash" },
     };
-    expect(normalizeSettings(good)).toEqual(good);
+    const migrated = normalizeSettings(old);
+    expect(migrated.mode).toBe("official");
+    expect(migrated.provider.apiKey).toBe("user_abc");
   });
 
-  it("空的 apiKey 不会被迁移过程弄脏", () => {
-    const migrated = normalizeSettings({ presetId: "glm", provider: { baseURL: "x", apiKey: "", model: "y" } });
-    expect(migrated.provider.apiKey).toBe("");
+  it("旧的 local 也迁移为 official（不再保留本地网关概念）", () => {
+    const old = {
+      presetId: "local",
+      provider: { baseURL: "http://127.0.0.1:3425/v1", apiKey: "magpie", model: "x" },
+    };
+    const migrated = normalizeSettings(old);
+    expect(migrated.mode).toBe("official");
+    expect(migrated.provider.baseURL).toBe(OFFICIAL_BASE_URL);
+  });
+
+  it("旧的 glm 迁移为 official，模型被带过来（可能会在测试连接时暴露）", () => {
+    const old = {
+      presetId: "glm",
+      provider: { baseURL: "https://open.bigmodel.cn/api/paas/v4/", apiKey: "k", model: "glm-4.7-flash" },
+    };
+    const migrated = normalizeSettings(old);
+    expect(migrated.mode).toBe("official");
+    expect(migrated.provider.baseURL).toBe(OFFICIAL_BASE_URL);
+  });
+
+  it("旧的 custom 迁移为 custom", () => {
+    const old = {
+      presetId: "custom",
+      provider: { baseURL: "https://x/v1", apiKey: "k", model: "m" },
+    };
+    expect(normalizeSettings(old).mode).toBe("custom");
+  });
+
+  it("完全没有配置时给默认值", () => {
+    expect(normalizeSettings(null)).toEqual(DEFAULT_SETTINGS);
+    expect(normalizeSettings(undefined)).toEqual(DEFAULT_SETTINGS);
+    expect(normalizeSettings("garbage")).toEqual(DEFAULT_SETTINGS);
+  });
+
+  it("provider 损坏时不崩，回落默认", () => {
+    const broken = { mode: "official", provider: { baseURL: 123 } };
+    expect(normalizeSettings(broken).provider.baseURL).toBe(OFFICIAL_BASE_URL);
   });
 });
 
-describe("预设与 provider 必须自洽（401 的真正来源）", () => {
-  it("presetId 已是 commandcode 但地址残留为智谱时，地址被纠正回 CommandCode", () => {
-    const inconsistent = {
-      presetId: "commandcode",
-      provider: {
-        baseURL: "https://open.bigmodel.cn/api/paas/v4/",
-        apiKey: "user_abc",
-        model: "glm-4.7-flash",
-      },
+describe("不提供推理强度选项", () => {
+  it("配置里没有 reasoningEffort 字段（默认不传，由模型自己决定）", () => {
+    expect(DEFAULT_SETTINGS).not.toHaveProperty("reasoningEffort");
+    const withStale = {
+      mode: "official",
+      provider: { baseURL: OFFICIAL_BASE_URL, apiKey: "k", model: "z-ai/glm-5.3-flash" },
+      reasoningEffort: "off",
     };
-
-    const fixed = normalizeSettings(inconsistent);
-
-    // 这条是核心：preset 是「用这套配置」的意思，不能让残留地址赢过它。
-    // 早期实现只在 presetId 变化时才替换 provider，于是这种自相矛盾的配置
-    // 会一路留到 background，拿 user_ key 去打智谱 → 401。
-    expect(fixed.provider.baseURL).toBe("https://api.commandcode.ai/provider/v1");
-    expect(fixed.provider.model).toBe("deepseek/deepseek-v4.1-flash");
-    expect(fixed.provider.apiKey).toBe("user_abc");
-  });
-
-  it("local 预设同理，地址被纠正为本机网关", () => {
-    const inconsistent = {
-      presetId: "local",
-      provider: { baseURL: "https://api.commandcode.ai/provider/v1", apiKey: "x", model: "y" },
-    };
-    expect(normalizeSettings(inconsistent).provider.baseURL).toBe("http://127.0.0.1:3425/v1");
-  });
-
-  it("custom 预设允许任意地址，不被纠正", () => {
-    const custom = {
-      presetId: "custom",
-      provider: { baseURL: "https://api.openai.com/v1", apiKey: "sk-x", model: "gpt-4o-mini" },
-    };
-    expect(normalizeSettings(custom).provider.baseURL).toBe("https://api.openai.com/v1");
-    expect(normalizeSettings(custom).provider.model).toBe("gpt-4o-mini");
+    expect(normalizeSettings(withStale)).not.toHaveProperty("reasoningEffort");
   });
 });
