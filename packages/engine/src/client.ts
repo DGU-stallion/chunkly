@@ -8,6 +8,20 @@ export interface LlmCallResult {
 }
 
 /**
+ * 单次请求的超时时间。
+ *
+ * 必须小于 Chrome 对扩展 service worker 的硬限制：官方文档明确写着
+ * 「a fetch() response takes more than 30 seconds to arrive」时 SW 会被终止。
+ * SW 一旦被杀，消息通道断开，用户看到的就是「切分失败」，而真正的
+ * 原因（模型太慢）完全不可见。
+ *
+ * 取 25s 留 5s 余量：超时后我们主动中止并重试，比让 SW 被杀可控得多。
+ * 实测踩坑：z-ai/glm-5.3-flash 处理 683 字文本曾跑到 43.8s，
+ * 这种请求必然会被 SW 生命周期干掉。
+ */
+const REQUEST_TIMEOUT_MS = 25_000;
+
+/**
  * 调用 OpenAI 兼容协议的 /chat/completions 接口。
  * GLM、OpenAI、以及 Claude/Gemini 的兼容层都遵循这一协议（见设计文档 3.2 节）。
  */
@@ -52,7 +66,9 @@ export async function callChatCompletions(
         Authorization: `Bearer ${provider.apiKey}`,
       },
       body: JSON.stringify(requestBody),
-      signal,
+      // 超时中止必须由我们自己做，不能依赖 SW 生命周期：
+      // SW 被杀时我们连错误都拿不到，只能看到通道断开。
+      signal: combineSignals(signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)),
     });
   } catch (err) {
     throw mapNetworkError(err);
@@ -78,6 +94,28 @@ function isGlmProvider(baseURL: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * 合并外部 signal 与超时 signal：任一触发即中止。
+ *
+ * AbortSignal.any 在 Chrome 116+ 可用，但为兼容更早的环境做降级。
+ */
+function combineSignals(signal: AbortSignal | undefined, timeout: AbortSignal): AbortSignal {
+  if (!signal) return timeout;
+
+  const anyFn = (AbortSignal as unknown as { any?: (s: AbortSignal[]) => AbortSignal }).any;
+  if (typeof anyFn === "function") return anyFn([signal, timeout]);
+
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  if (signal.aborted || timeout.aborted) {
+    controller.abort();
+    return controller.signal;
+  }
+  signal.addEventListener("abort", abort, { once: true });
+  timeout.addEventListener("abort", abort, { once: true });
+  return controller.signal;
 }
 
 function joinUrl(baseURL: string, path: string): string {

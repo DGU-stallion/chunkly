@@ -23,7 +23,6 @@ const modeRadios = document.querySelectorAll<HTMLInputElement>('input[name="mode
 const officialPane = $<HTMLDivElement>("officialPane");
 const customPane = $<HTMLDivElement>("customPane");
 const modelList = $<HTMLDivElement>("modelList");
-const apiKeyInput = $<HTMLInputElement>("apiKey");
 const customBaseURLInput = $<HTMLInputElement>("customBaseURL");
 const customApiKeyInput = $<HTMLInputElement>("customApiKey");
 const customModelInput = $<HTMLInputElement>("customModel");
@@ -124,18 +123,12 @@ async function init(): Promise<void> {
   const settings = await loadSettings();
   setMode(settings.mode);
 
-  apiKeyInput.value = settings.mode === "official" ? settings.provider.apiKey : "";
   renderModels(settings.provider.model);
 
   if (settings.mode === "custom") {
     customBaseURLInput.value = settings.provider.baseURL;
     customApiKeyInput.value = settings.provider.apiKey;
     customModelInput.value = settings.provider.model;
-  }
-
-  // 官方模式但没有 Key 时，直接把焦点放到 Key 上，省一次点击
-  if (settings.mode === "official" && !settings.provider.apiKey) {
-    apiKeyInput.focus();
   }
 }
 
@@ -148,7 +141,8 @@ function collectSettings(): StoredSettings {
       provider: {
         // 官方端点固定，不让用户为了改模型而误改地址
         baseURL: OFFICIAL_BASE_URL,
-        apiKey: apiKeyInput.value.trim(),
+        // 官方 Key 由构建注入到 background，设置里不存、页面上不显示
+        apiKey: "",
         // 尊重用户选的模型（这是之前保存不上的那个 bug）
         model: selectedModel(),
       },
@@ -169,9 +163,8 @@ function collectSettings(): StoredSettings {
 function validate(settings: StoredSettings): string | null {
   const { baseURL, apiKey, model } = settings.provider;
 
-  if (!apiKey) {
-    return settings.mode === "official" ? "请先填写 API Key" : "请填写 API Key";
-  }
+  // 官方模式的 Key 由构建注入，不校验
+  if (settings.mode === "custom" && !apiKey) return "请填写 API Key";
   if (!baseURL) return "请填写 API 地址";
   if (!model) return "请选择或填写模型";
 
@@ -187,10 +180,6 @@ function validate(settings: StoredSettings): string | null {
 
 modeRadios.forEach((radio) => {
   radio.addEventListener("change", () => setMode(currentMode()));
-});
-
-$<HTMLButtonElement>("toggleKey").addEventListener("click", () => {
-  togglePassword(apiKeyInput, $<HTMLButtonElement>("toggleKey"));
 });
 
 $<HTMLButtonElement>("toggleCustomKey").addEventListener("click", () => {

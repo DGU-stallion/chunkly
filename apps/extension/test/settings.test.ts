@@ -6,6 +6,7 @@ import {
   OFFICIAL_MODELS,
   DEFAULT_OFFICIAL_MODEL,
   isOfficialModel,
+  effortForModel,
 } from "../src/types.js";
 
 /**
@@ -18,10 +19,10 @@ import {
  */
 
 describe("默认配置", () => {
-  it("默认走官方端点，模型是 glm-5.3-flash", () => {
+  it("默认走官方端点，模型是最快的 deepseek", () => {
     expect(DEFAULT_SETTINGS.mode).toBe("official");
     expect(DEFAULT_SETTINGS.provider.baseURL).toBe(OFFICIAL_BASE_URL);
-    expect(DEFAULT_SETTINGS.provider.model).toBe("z-ai/glm-5.3-flash");
+    expect(DEFAULT_SETTINGS.provider.model).toBe("deepseek/deepseek-v4.1-flash");
   });
 
   it("默认不内置任何密钥", () => {
@@ -30,11 +31,11 @@ describe("默认配置", () => {
 
   it("官方可选模型正好是用户指定的三个", () => {
     expect(OFFICIAL_MODELS.map((m) => m.id)).toEqual([
-      "z-ai/glm-5.3-flash",
       "deepseek/deepseek-v4.1-flash",
+      "z-ai/glm-5.3-flash",
       "gpt-5.6-luna",
     ]);
-    expect(DEFAULT_OFFICIAL_MODEL).toBe("z-ai/glm-5.3-flash");
+    expect(DEFAULT_OFFICIAL_MODEL).toBe("deepseek/deepseek-v4.1-flash");
   });
 
   it("isOfficialModel 认三个官方模型，不认其他", () => {
@@ -177,5 +178,24 @@ describe("不提供推理强度选项", () => {
       reasoningEffort: "off",
     };
     expect(normalizeSettings(withStale)).not.toHaveProperty("reasoningEffort");
+  });
+});
+
+describe("推理强度按模型写死（不暴露给用户）", () => {
+  it("deepseek 配 off（它接受 off，2340ms vs low 5996ms）", () => {
+    expect(effortForModel("deepseek/deepseek-v4.1-flash")).toBe("off");
+  });
+
+  it("glm 配 low（它不支持 off，传 off 会 400）", () => {
+    expect(effortForModel("z-ai/glm-5.3-flash")).toBe("low");
+  });
+
+  it("gpt-5.6-luna 配 low", () => {
+    expect(effortForModel("gpt-5.6-luna")).toBe("low");
+  });
+
+  it("未知模型不传 effort（交给服务端默认）", () => {
+    expect(effortForModel("some-other-model")).toBeUndefined();
+    expect(effortForModel("")).toBeUndefined();
   });
 });

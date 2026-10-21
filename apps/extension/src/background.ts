@@ -12,6 +12,7 @@
  */
 import { chunk, ChunkEngineError } from "@chunkly/engine";
 import { loadSettings } from "./storage.js";
+import { effortForModel } from "./types.js";
 import { createChunkCache, buildCacheKey, type StorageLike } from "./cache.js";
 import type { ChunkRequestMessage, ChunkResponseMessage } from "./types.js";
 
@@ -73,10 +74,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 async function handleChunk(message: ChunkRequestMessage): Promise<ChunkResponseMessage> {
   try {
     const settings = await loadSettings();
-    if (!settings.provider.apiKey) {
+    const apiKey = resolveApiKey(settings);
+    if (!apiKey) {
       return {
         ok: false,
-        error: { code: "NO_API_KEY", message: "尚未配置 API Key", retryable: false },
+        error: {
+          code: settings.mode === "official" ? "NO_OFFICIAL_KEY" : "NO_API_KEY",
+          message:
+            settings.mode === "official"
+              ? "此版本未内置官方 Key，请到设置页切换到「自定义」并填入你自己的 Key"
+              : "尚未配置 API Key",
+          retryable: false,
+        },
       };
     }
 
@@ -92,10 +101,22 @@ async function handleChunk(message: ChunkRequestMessage): Promise<ChunkResponseM
       return { ok: true, chunks: hit, cached: true };
     }
 
-    // 不传 reasoningEffort：这个取舍因模型而异（deepseek 关掉快一倍，
-    // haiku 关掉反而慢一倍），统一不设、让各模型走自己的默认更靠谱。
+    // reasoning effort 按模型写死最优值：切分是浅层句法任务，thinking 纯浪费，
+    // 实测差 4.4 倍（deepseek off 2340ms vs 不传 10368ms 的 glm）。
+    // 但支持的取值因模型而异（off 只有部分模型接受，传给 glm 会 400），
+    // 所以只能逐模型配对，不能全局设一个。
     const result = await chunk(message.text, {
-      provider: settings.provider,
+      provider: { ...settings.provider, apiKey },
+      // 自定义模式不干预用户配的模型，交给服务端默认
+      reasoningEffort:
+        settings.mode === "official"
+          ? (effortForModel(settings.provider.model) as
+              | "off"
+              | "low"
+              | "medium"
+              | "high"
+              | undefined)
+          : undefined,
     });
 
     const chunks = result.chunks.map((c) => ({
@@ -115,6 +136,24 @@ async function handleChunk(message: ChunkRequestMessage): Promise<ChunkResponseM
       error: { code: "NETWORK_ERROR", message: String(err), retryable: true },
     };
   }
+}
+
+/**
+ * 决定本次请求用哪个 Key。
+ *
+ * 官方模式的 Key **不放在设置页**（那是用户可读的），而是构建时注入到
+ * background 里。这样可以避免把开发者配额交给每个用户，也不会出现
+ * 「用户手滑改掉官方 Key 就永远 401」的情况。
+ *
+ * 自定义模式才用用户自己填的 Key。
+ */
+function resolveApiKey(settings: { mode: string; provider: { apiKey: string } }): string {
+  if (settings.mode === "custom") {
+    return settings.provider.apiKey;
+  }
+  const injected =
+    typeof __CHUNKLY_OFFICIAL_API_KEY__ === "string" ? __CHUNKLY_OFFICIAL_API_KEY__ : "";
+  return injected;
 }
 
 /**

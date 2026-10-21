@@ -313,7 +313,7 @@
           <label>
             <input type="radio" name="mode" value="official" />
             <span class="t">官方</span>
-            <span class="s">填充 Key 即可用，模型三选一</span>
+            <span class="s">开箱即用，模型三选一</span>
           </label>
           <label>
             <input type="radio" name="mode" value="custom" />
@@ -325,17 +325,9 @@
         <!-- 官方 -->
         <div id="officialPane">
           <div class="field">
-            <label for="apiKey">API Key</label>
-            <div class="input-row">
-              <input id="apiKey" type="password" placeholder="user_..." autocomplete="off" spellcheck="false" />
-              <button class="btn btn-ghost" id="toggleKey" type="button">显示</button>
-            </div>
-            <p class="help">以 <code>user_</code> 开头，共 93 个字符。</p>
-          </div>
-
-          <div class="field">
             <label>模型</label>
             <div class="models" id="modelList"></div>
+            <p class="help">官方模式已内置额度，不需要填写 API Key。</p>
           </div>
         </div>
 

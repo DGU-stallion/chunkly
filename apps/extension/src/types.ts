@@ -3,9 +3,9 @@
  *
  * 设置模型只有两个分支，这是刻意的：
  *
- * - **official（官方）**：走 Chunkly 自己配置的 CommandCode 端点，用户不需要
- *   也**不应该**碰地址和 Key（插件对外发布后，让用户填本地网关地址毫无意义）。
- *   用户唯一的选择是模型，从实测可用的三个里挑。
+ * - **official（官方）**：走 Chunkly 自己配置的 CommandCode 端点。
+ *   用户**不需要也不应该看到或填写 Key**——官方模式用开发者自己的配额，
+ *   在设置页放一个 Key 输入框等于把开发者的密钥交给每个用户。
  * - **custom（自定义）**：愿意自己配的人填 baseURL / apiKey / model。
  *
  * 为什么不再提供「本机网关」预设：这个插件是要对外发布的。让外部用户
@@ -28,25 +28,39 @@ export const OFFICIAL_BASE_URL = "https://api.commandcode.ai/provider/v1";
  */
 export const OFFICIAL_MODELS = [
   {
-    id: "z-ai/glm-5.3-flash",
-    label: "GLM-5.3 Flash",
-    note: "默认。中文语感好，速度与粒度平衡",
-  },
-  {
     id: "deepseek/deepseek-v4.1-flash",
     label: "DeepSeek V4.1 Flash",
-    note: "切分更细（约 4 词/意群）",
+    note: "最快（约 2.3s）。切分更细，约 3–4 词/意群",
+    /** 该模型接受 off，且关掉 thinking 后 2340ms（low 要 5996ms） */
+    effort: "off",
+  },
+  {
+    id: "z-ai/glm-5.3-flash",
+    label: "GLM-5.3 Flash",
+    note: "切分偏粗，约 5 词/意群",
+    /** 不支持 off（会 400），low 已是无 reasoning 的最快档 */
+    effort: "low",
   },
   {
     id: "gpt-5.6-luna",
     label: "GPT-5.6 Luna",
-    note: "粒度居中，稳定性好",
+    note: "粒度居中，约 4 词/意群",
+    effort: "low",
   },
 ] as const;
 
-export type OfficialModelId = (typeof OFFICIAL_MODELS)[number]["id"];
+/**
+ * 默认模型。选 deepseek 是因为它最快（2.3s vs glm 4.8s / luna 4.3s）
+ * 且切分粒度最接近意群阅读的推荐值（3–4 词）。
+ */
+export const DEFAULT_OFFICIAL_MODEL: OfficialModelId = "deepseek/deepseek-v4.1-flash";
 
-export const DEFAULT_OFFICIAL_MODEL: OfficialModelId = "z-ai/glm-5.3-flash";
+/** 取某个模型对应的最优 reasoning_effort；未知模型返回 undefined（不传）。 */
+export function effortForModel(model: string): string | undefined {
+  return OFFICIAL_MODELS.find((m) => m.id === model)?.effort;
+}
+
+export type OfficialModelId = (typeof OFFICIAL_MODELS)[number]["id"];
 
 export interface StoredSettings {
   /** "official" 用官方端点（只选模型）；"custom" 全部自己填 */
@@ -54,6 +68,12 @@ export interface StoredSettings {
   provider: ProviderConfig;
 }
 
+/**
+ * 默认配置。
+ *
+ * apiKey 为空是刻意的：官方模式的 Key **不进入设置页**，
+ * 而由构建时注入（见 vite.config 的 define 与 background.ts）。
+ */
 export const DEFAULT_SETTINGS: StoredSettings = {
   mode: "official",
   provider: { baseURL: OFFICIAL_BASE_URL, apiKey: "", model: DEFAULT_OFFICIAL_MODEL },
@@ -89,3 +109,8 @@ export type ChunkResponseMessage =
       cached: boolean;
     }
   | { ok: false; error: { code: string; message: string; retryable: boolean } };
+
+/** 构建时由 vite.background.config.ts 的 define 注入的官方 Key（仅 background 可见） */
+declare global {
+  const __CHUNKLY_OFFICIAL_API_KEY__: string;
+}
