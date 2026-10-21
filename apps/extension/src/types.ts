@@ -6,20 +6,14 @@ import type { ProviderConfig } from "@chunkly/engine";
 export interface StoredSettings {
   /**
    * "commandcode" 直连 CommandCode（api.commandcode.ai），自带订阅额度、不限流、可关 thinking
-   * "glm"         智谱官方 API（需自己申请 Key，免费额度实测频繁 429）
    * "local"       本机 OpenAI 兼容网关（如 magpie）
    * "custom"      完全自定义三项
    */
-  presetId: "commandcode" | "glm" | "local" | "custom";
+  presetId: "commandcode" | "local" | "custom";
   provider: ProviderConfig;
   /** 透传给 Provider 的推理强度；"off" 可关掉 thinking（延迟减半） */
   reasoningEffort?: "off" | "low" | "medium" | "high";
 }
-
-export const GLM_PRESET: Pick<ProviderConfig, "baseURL" | "model"> = {
-  baseURL: "https://open.bigmodel.cn/api/paas/v4/",
-  model: "glm-4.7-flash",
-};
 
 /**
  * CommandCode 直连（不经 magpie 网关）。
@@ -42,9 +36,27 @@ export const LOCAL_PRESET: Pick<ProviderConfig, "baseURL" | "model"> = {
   model: "commandcode-plan/deepseek/deepseek-v4.1-flash",
 };
 
+/**
+ * 所有可选预设。GLM 已删除：
+ * 它需要另申请 key、免费额度实测频繁 429、且不支持 `reasoning_effort=off`
+ * （传了直接 400）。保留它只会让用户填错 key 却没地方发现。
+ */
+export const PRESETS = {
+  commandcode: COMMANDCODE_PRESET,
+  local: LOCAL_PRESET,
+} as const;
+
+/**
+ * 默认配置。必须是**唯一的真实用途**，否则用户会填对 key 却用错地址。
+ *
+ * 历史蚊坑：默认曾是 GLM，而设置页在字段为空时又兜底到默认值，
+ * 导致用户粘上 CommandCode 的 `user_...` key 后，实际存的是 open.bigmodel.cn，
+ * 智谱返回 401，界面却提示「API Key 无效」——key 是对的，报错误导。
+ */
 export const DEFAULT_SETTINGS: StoredSettings = {
-  presetId: "glm",
-  provider: { baseURL: GLM_PRESET.baseURL, apiKey: "", model: GLM_PRESET.model },
+  presetId: "commandcode",
+  provider: { ...COMMANDCODE_PRESET, apiKey: "" },
+  reasoningEffort: "off",
 };
 /** background <-> content 之间的消息协议 */
 export interface ChunkRequestMessage {

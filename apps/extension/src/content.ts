@@ -3,13 +3,15 @@
  *
  * 这里**不直接发网络请求**——请求在 background service worker 里发出，原因见 background.ts。
  */
-import { chunkFast, type Chunk } from "@chunkly/engine";
+import type { Chunk } from "@chunkly/engine";
 import { applyHighlight, undoHighlight } from "./highlight.js";
 import type { ChunkResponseMessage } from "./types.js";
 
 const ERROR_HINT: Record<string, string> = {
   NO_API_KEY: "Chunkly：尚未配置 API Key，请点击插件图标打开设置页完成配置",
-  AUTH_FAILED: "Chunkly：API Key 无效，请到设置页检查配置",
+  // 不要把 401 一律说成「Key 无效」：实测更常见的原因是 provider 配错了
+  // （例如把 CommandCode 的 user_ key 填到了智谱地址上）。提示要指向真正要检查的东西。
+  AUTH_FAILED: "Chunkly：鉴权失败。请到设置页确认「API 地址」与「Key」是同一家的",
   RATE_LIMITED: "Chunkly：触发速率限制，请稍后再试",
   TIMEOUT: "Chunkly：请求超时，请重试",
   SERVICE_UNAVAILABLE: "Chunkly：服务暂时不可用，请检查网络后重试",
@@ -33,8 +35,6 @@ function ensureHighlightStyleInjected(): void {
     "#" + TOAST_ID + " { position: fixed; z-index: 2147483647; right: 16px; bottom: 16px;",
     "  padding: 8px 12px; border-radius: 6px; background: #111827; color: #fff;",
     "  font: 13px/1.4 system-ui, sans-serif; box-shadow: 0 4px 14px rgba(0,0,0,.25); }",
-    // 规则法先出的结果用虚线标出，告诉用户“这版可能不准，正在优化”
-    ".chunkly-provisional { outline: 1px dashed rgba(107,114,128,.55); outline-offset: -1px; }",
   ].join("\n");
   document.head.appendChild(style);
 }
@@ -66,19 +66,8 @@ async function handleTrigger(): Promise<void> {
   undoHighlight(document.body);
   ensureHighlightStyleInjected();
 
-  // ---- 第一阶段：规则法秒出 ----
-  // 云端 LLM 有约 2.4s 的恒定前置开销，且与输出长度无关（见 docs/优化清单.md）。
-  // 等它等于让用户盯空白 2.4 秒，所以先用规则法渲染一版（<1ms），
-  // 再让 LLM 结果到达后覆盖。规则版用虚线标出，表示“可能不准”。
-  const provisional = chunkFast(text);
-  if (provisional.length > 0) {
-    applyHighlight(range, text, provisional);
-    markProvisional();
-  }
+  const toast = showToast("Chunkly：切分中…");
 
-  const toast = showToast("Chunkly：正在用模型优化切分…");
-
-  // ---- 第二阶段：LLM 精确结果 ----
   let response: ChunkResponseMessage;
   try {
     response = (await chrome.runtime.sendMessage({
@@ -86,64 +75,24 @@ async function handleTrigger(): Promise<void> {
       text,
     })) as ChunkResponseMessage;
   } catch {
-    toast.textContent = "Chunkly：无法连接后台，已保留规则切分";
-    clearProvisionalMark();
-    setTimeout(() => toast.remove(), 2500);
+    toast.textContent = "Chunkly：无法连接后台，请重新加载插件";
     return;
   }
 
   if (!response || !response.ok) {
     const code = response?.error?.code;
-    // 关键是：LLM 失败时**不要**清掉规则版，降级可读总比空白好
-    toast.textContent =
-      ((code && ERROR_HINT[code]) ?? "Chunkly：模型切分失败") + "（已保留规则切分）";
-    clearProvisionalMark();
-    setTimeout(() => toast.remove(), 2500);
+    toast.textContent = (code && ERROR_HINT[code]) ?? "Chunkly：发生未知错误";
+    setTimeout(() => toast.remove(), 3000);
     return;
   }
 
   toast.remove();
-  applyFinalHighlight(response.chunks, text, response.cached);
-}
+  applyHighlight(range, text, response.chunks as Chunk[]);
 
-/**
- * 用 LLM 结果覆盖规则法的结果。
- *
- * 做法：先撤销规则版（无损，见 ADR-0001），再根据当前选区重新定位并高亮。
- * 不能复用第一次的 range：撤销会 normalize 文本节点，旧 range 的容器可能已失效。
- */
-function applyFinalHighlight(
-  chunks: Array<{ text: string; startOffset: number; endOffset: number }>,
-  text: string,
-  cached: boolean
-): void {
-  const selection = window.getSelection();
-  if (!selection || selection.rangeCount === 0) return;
-
-  undoHighlight(document.body);
-  ensureHighlightStyleInjected();
-
-  const range = selection.getRangeAt(0);
-  applyHighlight(range, text, chunks as Chunk[]);
-  clearProvisionalMark();
-
-  if (cached) {
+  if (response.cached) {
     const t = showToast("Chunkly：命中缓存");
     setTimeout(() => t.remove(), 1200);
   }
-}
-
-/** 给当前所有高亮加上“暂定”标记 */
-function markProvisional(): void {
-  document
-    .querySelectorAll(".chunkly-chunk")
-    .forEach((el) => el.classList.add("chunkly-provisional"));
-}
-
-function clearProvisionalMark(): void {
-  document
-    .querySelectorAll(".chunkly-provisional")
-    .forEach((el) => el.classList.remove("chunkly-provisional"));
 }
 
 chrome.runtime.onMessage.addListener((message) => {
