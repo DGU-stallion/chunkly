@@ -14,9 +14,10 @@ import { chunk, ChunkEngineError } from "@chunkly/engine";
 import { loadSettings } from "./storage.js";
 import { effortForModel } from "./types.js";
 import { createChunkCache, buildCacheKey, type StorageLike } from "./cache.js";
-import type { ChunkRequestMessage, ChunkResponseMessage } from "./types.js";
+import type { ChunkRequestMessage, ChunkResponseMessage, StoredSettings } from "./types.js";
 
 const MENU_ID = "chunkly-chunk-selection";
+const MENU_SPEAK_ID = "chunkly-speak-selection";
 const MENU_UNDO_ID = "chunkly-undo";
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -26,8 +27,13 @@ chrome.runtime.onInstalled.addListener(() => {
     contexts: ["selection"],
   });
   chrome.contextMenus.create({
+    id: MENU_SPEAK_ID,
+    title: "Chunkly：意群卡拉OK朗读",
+    contexts: ["selection"],
+  });
+  chrome.contextMenus.create({
     id: MENU_UNDO_ID,
-    title: "Chunkly：清除高亮",
+    title: "Chunkly：清除高亮与朗读",
     contexts: ["page", "selection"],
   });
 });
@@ -40,6 +46,8 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (tab?.id === undefined) return;
   if (info.menuItemId === MENU_ID) {
     chrome.tabs.sendMessage(tab.id, { type: "CHUNKLY_TRIGGER" });
+  } else if (info.menuItemId === MENU_SPEAK_ID) {
+    chrome.tabs.sendMessage(tab.id, { type: "CHUNKLY_SPEAK" });
   } else if (info.menuItemId === MENU_UNDO_ID) {
     chrome.tabs.sendMessage(tab.id, { type: "CHUNKLY_UNDO" });
   }
@@ -48,7 +56,14 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 /** 快捷键：转发给当前激活 tab 的 content script */
 chrome.commands?.onCommand.addListener((command, tab) => {
   if (tab?.id === undefined) return;
-  const type = command === "chunk-selection" ? "CHUNKLY_TRIGGER" : command === "undo-highlight" ? "CHUNKLY_UNDO" : null;
+  const type =
+    command === "chunk-selection"
+      ? "CHUNKLY_TRIGGER"
+      : command === "speak-selection"
+      ? "CHUNKLY_SPEAK"
+      : command === "undo-highlight"
+      ? "CHUNKLY_UNDO"
+      : null;
   if (type) {
     chrome.tabs.sendMessage(tab.id, { type });
   }
@@ -68,8 +83,100 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true; // 异步响应
   }
 
+  if (message?.type === "CHUNKLY_FETCH_TTS") {
+    const text = typeof message.text === "string" ? message.text.trim() : "";
+    const lang = typeof message.lang === "string" ? message.lang : "en";
+    fetchGoogleTTSAudio(text, lang)
+      .then((audioUrl) => {
+        sendResponse({ ok: true, audioUrl });
+      })
+      .catch((err) => {
+        sendResponse({ ok: false, error: String(err) });
+      });
+    return true;
+  }
+
+  if (message?.type === "TEST_CONNECTION") {
+    void handleTestConnection(message.settings).then(sendResponse);
+    return true; // 异步响应
+  }
+
   return undefined;
 });
+
+async function handleTestConnection(
+  targetSettings?: StoredSettings
+): Promise<{ ok: boolean; status?: number; elapsed?: number; error?: string }> {
+  try {
+    const settings = targetSettings ?? (await loadSettings());
+    const apiKey = resolveApiKey(settings);
+    if (!apiKey) {
+      return {
+        ok: false,
+        error:
+          settings.mode === "official"
+            ? "构建时未注入官方 Key，请到设置页切换为「自定义」并填写自己的 Key"
+            : "尚未填写 API Key",
+      };
+    }
+
+    const startedAt = Date.now();
+    const url = settings.provider.baseURL.replace(/\/+$/, "") + "/chat/completions";
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: settings.provider.model,
+        messages: [{ role: "user", content: "hi" }],
+        max_tokens: 4,
+        temperature: 0,
+      }),
+    });
+
+    const elapsed = Date.now() - startedAt;
+    const bodyText = await resp.text().catch(() => "");
+    if (resp.ok) {
+      return { ok: true, elapsed };
+    }
+    return {
+      ok: false,
+      status: resp.status,
+      elapsed,
+      error: describeHttpFailure(resp.status, bodyText, settings.provider.baseURL),
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: `无法连接：${message}` };
+  }
+}
+
+function describeHttpFailure(status: number, bodyText: string, baseURL: string): string {
+  const snippet = bodyText.slice(0, 140).replace(/\s+/g, " ").trim();
+  let host = baseURL;
+  try {
+    host = new URL(baseURL).host;
+  } catch {
+    // ignore
+  }
+  const tail = snippet ? ` 详情：${snippet}` : "";
+
+  if (status === 401 || status === 403) {
+    return `鉴权失败（${status}）。请确认这个 Key 属于 ${host} —— Key 与地址必须来自同一家服务。${tail}`;
+  }
+  if (status === 404) {
+    return `地址不存在（404）。检查 API 地址是否漏了路径，例如应形如 …/provider/v1。${tail}`;
+  }
+  if (status === 429) {
+    return `触发限流（429）。稍后再试。${tail}`;
+  }
+  if (status >= 500) {
+    return `服务端错误（${status}）。不是你的配置问题，稍后重试。${tail}`;
+  }
+  return `请求失败（${status}）。${tail}`;
+}
 
 async function handleChunk(message: ChunkRequestMessage): Promise<ChunkResponseMessage> {
   try {
@@ -193,4 +300,46 @@ async function getCache(): Promise<ReturnType<typeof createChunkCache>> {
 
   cacheInstance = createChunkCache(adapter);
   return cacheInstance;
+}
+
+/** Google Translate 高品质云端神经音频缓存 */
+const ttsAudioCache = new Map<string, string>();
+
+export async function fetchGoogleTTSAudio(text: string, lang = "en"): Promise<string> {
+  const cacheKey = `${lang}:${text}`;
+  const hit = ttsAudioCache.get(cacheKey);
+  if (hit) return hit;
+
+  const url = `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=${encodeURIComponent(
+    lang
+  )}&q=${encodeURIComponent(text)}`;
+
+  // 严格设置 2500ms 超时：若 Google 服务受阻或断网，立即中断并降级为本地神经语音，坚决不阻塞用户听感
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 2500);
+
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) {
+      throw new Error(`Google TTS HTTP ${res.status}`);
+    }
+    const blob = await res.blob();
+    const buffer = await blob.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    const len = bytes.byteLength;
+    for (let i = 0; i < len; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    const base64 = `data:audio/mpeg;base64,${btoa(binary)}`;
+
+    if (ttsAudioCache.size > 80) {
+      const firstKey = ttsAudioCache.keys().next().value;
+      if (firstKey) ttsAudioCache.delete(firstKey);
+    }
+    ttsAudioCache.set(cacheKey, base64);
+    return base64;
+  } finally {
+    clearTimeout(timer);
+  }
 }

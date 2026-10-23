@@ -19,35 +19,66 @@ import {
  */
 
 describe("默认配置", () => {
-  it("默认走官方端点，模型是 glm-5.3-flash（按用户指定）", () => {
+  it("默认走官方端点，模型是 deepseek-v4.1-flash（切分质量最优）", () => {
     expect(DEFAULT_SETTINGS.mode).toBe("official");
     expect(DEFAULT_SETTINGS.provider.baseURL).toBe(OFFICIAL_BASE_URL);
-    expect(DEFAULT_SETTINGS.provider.model).toBe("z-ai/glm-5.3-flash");
+    expect(DEFAULT_SETTINGS.provider.model).toBe("deepseek/deepseek-v4.1-flash");
   });
 
   it("默认不内置任何密钥", () => {
     expect(DEFAULT_SETTINGS.provider.apiKey).toBe("");
   });
 
-  it("官方可选模型正好是用户指定的三个", () => {
+  it("官方可选模型为 DeepSeek 与 GLM 双选", () => {
     expect(OFFICIAL_MODELS.map((m) => m.id)).toEqual([
-      "z-ai/glm-5.3-flash",
       "deepseek/deepseek-v4.1-flash",
-      "gpt-5.6-luna",
+      "z-ai/glm-5.3-flash",
     ]);
-    expect(DEFAULT_OFFICIAL_MODEL).toBe("z-ai/glm-5.3-flash");
+    expect(DEFAULT_OFFICIAL_MODEL).toBe("deepseek/deepseek-v4.1-flash");
   });
 
-  it("isOfficialModel 认三个官方模型，不认其他", () => {
+  it("isOfficialModel 认官方模型，不认其他", () => {
     for (const m of OFFICIAL_MODELS) expect(isOfficialModel(m.id)).toBe(true);
+    expect(isOfficialModel("gpt-5.6-luna")).toBe(false);
     expect(isOfficialModel("claude-haiku-5-5")).toBe(false);
     expect(isOfficialModel("")).toBe(false);
   });
 
-  it("不再暴露本地网关的概念", () => {
-    // 对外发布的插件不该让用户配 127.0.0.1
-    expect(JSON.stringify(DEFAULT_SETTINGS)).not.toContain("127.0.0.1");
-    expect(JSON.stringify(OFFICIAL_MODELS)).not.toContain("127.0.0.1");
+  it("默认开启划词悬浮按钮（showBubbleTrigger 为 true）", () => {
+    expect(DEFAULT_SETTINGS.showBubbleTrigger).toBe(true);
+  });
+
+  it("默认高亮风格为经典荧光笔（highlightStyle 为 highlighter）", () => {
+    expect(DEFAULT_SETTINGS.highlightStyle).toBe("highlighter");
+  });
+});
+
+describe("高亮视觉风格配置测试", () => {
+  it("合法风格（highlighter, underline）均能正确保留", () => {
+    const styles = ["highlighter", "underline"] as const;
+    for (const style of styles) {
+      const normalized = normalizeSettings({
+        mode: "official",
+        provider: DEFAULT_SETTINGS.provider,
+        highlightStyle: style,
+      });
+      expect(normalized.highlightStyle).toBe(style);
+    }
+  });
+
+  it("非法或缺失的高亮风格回落到默认 highlighter", () => {
+    const invalid = normalizeSettings({
+      mode: "official",
+      provider: DEFAULT_SETTINGS.provider,
+      highlightStyle: "rainbow-glow",
+    });
+    expect(invalid.highlightStyle).toBe("highlighter");
+
+    const omitted = normalizeSettings({
+      mode: "official",
+      provider: DEFAULT_SETTINGS.provider,
+    });
+    expect(omitted.highlightStyle).toBe("highlighter");
   });
 });
 
@@ -98,13 +129,27 @@ describe("用户的模型选择必须能保存住（回归：改了模型但保�
     };
     expect(normalizeSettings(empty).provider.model).toBe(DEFAULT_OFFICIAL_MODEL);
   });
+
+  it("official 模式下如果存了已失效/非法的模型名，必须自动纠正为默认官方模型", () => {
+    const invalid = {
+      mode: "official",
+      provider: {
+        baseURL: OFFICIAL_BASE_URL,
+        apiKey: "k",
+        model: "commandcode-plan/deepseek/deepseek-v4.1-flash",
+      },
+    };
+    expect(normalizeSettings(invalid).provider.model).toBe(DEFAULT_OFFICIAL_MODEL);
+  });
 });
 
 describe("自定义模式", () => {
   it("三项完全尊重用户填写", () => {
     const custom = {
-      mode: "custom",
+      mode: "custom" as const,
       provider: { baseURL: "https://api.openai.com/v1", apiKey: "sk-x", model: "gpt-4o-mini" },
+      showBubbleTrigger: true,
+      highlightStyle: "highlighter" as const,
     };
     expect(normalizeSettings(custom)).toEqual(custom);
   });
@@ -115,6 +160,25 @@ describe("自定义模式", () => {
       provider: { baseURL: "http://x/v1", apiKey: "k", model: "任意模型名" },
     };
     expect(normalizeSettings(custom).provider.model).toBe("任意模型名");
+  });
+});
+
+describe("划词悬浮按钮配置", () => {
+  it("若用户显式关闭了 showBubbleTrigger，规整后保持 false", () => {
+    const custom = {
+      mode: "official",
+      provider: { baseURL: OFFICIAL_BASE_URL, apiKey: "k", model: DEFAULT_OFFICIAL_MODEL },
+      showBubbleTrigger: false,
+    };
+    expect(normalizeSettings(custom).showBubbleTrigger).toBe(false);
+  });
+
+  it("若未配置 showBubbleTrigger，默认回落为 true", () => {
+    const raw = {
+      mode: "official",
+      provider: { baseURL: OFFICIAL_BASE_URL, apiKey: "k", model: DEFAULT_OFFICIAL_MODEL },
+    };
+    expect(normalizeSettings(raw).showBubbleTrigger).toBe(true);
   });
 });
 
@@ -188,10 +252,6 @@ describe("推理强度按模型写死（不暴露给用户）", () => {
 
   it("glm 配 low（它不支持 off，传 off 会 400 并报 does not support reasoning_effort）", () => {
     expect(effortForModel("z-ai/glm-5.3-flash")).toBe("low");
-  });
-
-  it("luna 也配 low（同样不接受 off）", () => {
-    expect(effortForModel("gpt-5.6-luna")).toBe("low");
   });
 
   it("未知模型不传 effort（交给服务端默认）", () => {

@@ -13,7 +13,8 @@
     "https://api.commandcode.ai/*",
     "https://open.bigmodel.cn/*",
     "http://127.0.0.1/*",
-    "http://localhost/*"
+    "http://localhost/*",
+    "https://translate.google.com/*"
   ],
   "optional_host_permissions": [
     "<all_urls>"
@@ -26,27 +27,48 @@
       "matches": [
         "<all_urls>"
       ],
+      "css": [
+        "content.css"
+      ],
       "js": [
         "content.js"
       ]
     }
   ],
+  "icons": {
+    "16": "icons/icon-16.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
   "options_page": "options.html",
   "action": {
-    "default_title": "Chunkly"
+    "default_title": "Chunkly",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
   },
   "commands": {
     "chunk-selection": {
       "suggested_key": {
-        "default": "Ctrl+Shift+C",
-        "mac": "Command+Shift+C"
+        "default": "Alt+Shift+C",
+        "mac": "Alt+Shift+C"
       },
       "description": "切分选中文本"
     },
+    "speak-selection": {
+      "suggested_key": {
+        "default": "Alt+Shift+S",
+        "mac": "Alt+Shift+S"
+      },
+      "description": "意群卡拉OK朗读"
+    },
     "undo-highlight": {
       "suggested_key": {
-        "default": "Ctrl+Shift+Z",
-        "mac": "Command+Shift+Z"
+        "default": "Alt+Shift+Z",
+        "mac": "Alt+Shift+Z"
       },
       "description": "撤销 Chunkly 高亮"
     }

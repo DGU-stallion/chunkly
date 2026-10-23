@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { applyHighlight, undoHighlight } from "../src/highlight.js";
+import {
+  applyHighlight,
+  undoHighlight,
+  setActiveHighlightChunk,
+} from "../src/highlight.js";
 import type { Chunk } from "@chunkly/engine";
 
 /**
@@ -238,5 +242,157 @@ describe("跨段落选区（ticket 04）", () => {
 
     expect(root.querySelector("#a")!.textContent).toBe("Reading English");
     expect(root.querySelector("#b")!.textContent).toBe("in phrase chunks");
+  });
+
+  it("选区包含多段换行（\\n\\n）时，换行符绝不包进 chunk span，只在英文文字上渲染", () => {
+    document.body.innerHTML =
+      "<div id='root'><p id='a'>Paragraph one text.</p><p id='b'>Paragraph two text.</p></div>";
+    const root = document.getElementById("root") as HTMLDivElement;
+    // 浏览器跨段划选时产生的真实 fullText（包含段间 \\n\\n）
+    const fullText = "Paragraph one text.\n\nParagraph two text.";
+
+    const range = document.createRange();
+    range.setStart(root.querySelector("#a")!.firstChild!, 0);
+    range.setEnd(root.querySelector("#b")!.firstChild!, 19);
+
+    applyHighlight(range, fullText, [
+      { text: "Paragraph one text.", startOffset: 0, endOffset: 19 },
+      { text: "\n\nParagraph two text.", startOffset: 19, endOffset: 40 },
+    ]);
+
+    const spans = Array.from(root.querySelectorAll(".chunkly-chunk"));
+    expect(spans.length).toBeGreaterThan(0);
+    // 契约：任何 chunk span 的文字内容均严禁包含 \n 或 \r
+    for (const span of spans) {
+      expect(span.textContent).not.toMatch(/[\r\n]/);
+    }
+    // 第一段和第二段均被正确包裹，且文字内容精确对应
+    expect(root.querySelector("#a")!.querySelector(".chunkly-chunk")!.textContent).toBe("Paragraph one text.");
+    expect(root.querySelector("#b")!.querySelector(".chunkly-chunk")!.textContent).toBe("Paragraph two text.");
+
+    // 撤销后无损还原
+    undoHighlight(root);
+    expect(root.querySelector("#a")!.textContent).toBe("Paragraph one text.");
+    expect(root.querySelector("#b")!.textContent).toBe("Paragraph two text.");
+  });
+
+  it("单文本节点内部包含换行符（如 pre 或多行文本）时，换行符保持裸露，不被 span 包裹", () => {
+    document.body.innerHTML = "<div id='article'>First line of story.\n\nSecond line of story.</div>";
+    const div = document.getElementById("article") as HTMLDivElement;
+    const fullText = "First line of story.\n\nSecond line of story.";
+
+    const range = document.createRange();
+    range.selectNodeContents(div);
+
+    applyHighlight(range, fullText, [
+      { text: "First line of story.", startOffset: 0, endOffset: 20 },
+      { text: "\n\nSecond line of story.", startOffset: 20, endOffset: 43 },
+    ]);
+
+    const spans = Array.from(div.querySelectorAll(".chunkly-chunk"));
+    expect(spans).toHaveLength(2);
+    expect(spans[0].textContent).toBe("First line of story.");
+    expect(spans[1].textContent).toBe("Second line of story.");
+    // 容器整体文本依然严格逐字一致
+    expect(div.textContent).toBe(fullText);
+
+    undoHighlight(div);
+    expect(div.textContent).toBe(fullText);
+    expect(div.querySelectorAll(".chunkly-chunk")).toHaveLength(0);
+  });
+});
+
+describe("setActiveHighlightChunk 卡拉OK视听同步高亮", () => {
+  it("指定 chunkIndex 时，将该意群的所有 span 赋予 active 类，其他取消", () => {
+    document.body.innerHTML = "<p id='p'>Alpha Beta Gamma</p>";
+    const p = document.getElementById("p") as HTMLParagraphElement;
+    const text = "Alpha Beta Gamma";
+    const range = document.createRange();
+    range.selectNodeContents(p);
+
+    applyHighlight(range, text, [
+      { text: "Alpha", startOffset: 0, endOffset: 5 },
+      { text: " Beta", startOffset: 5, endOffset: 10 },
+      { text: " Gamma", startOffset: 10, endOffset: 16 },
+    ]);
+
+    setActiveHighlightChunk(p, 1);
+    const spans = p.querySelectorAll(".chunkly-chunk");
+    expect(spans[0].classList.contains("chunkly-chunk-active")).toBe(false);
+    expect(spans[1].classList.contains("chunkly-chunk-active")).toBe(true);
+    expect(spans[2].classList.contains("chunkly-chunk-active")).toBe(false);
+
+    setActiveHighlightChunk(p, null);
+    expect(p.querySelectorAll(".chunkly-chunk-active").length).toBe(0);
+  });
+
+  it("当页面存在多个独立切分段落时，传入 scopeId 仅激活指定段落的意群，其他段落绝不联动跳动", () => {
+    document.body.innerHTML = `
+      <div id='doc'>
+        <p id='paraA'>Paragraph A chunk 0. Paragraph A chunk 1.</p>
+        <p id='paraB'>Paragraph B chunk 0. Paragraph B chunk 1.</p>
+      </div>
+    `;
+    const doc = document.getElementById("doc") as HTMLDivElement;
+    const pA = document.getElementById("paraA") as HTMLParagraphElement;
+    const pB = document.getElementById("paraB") as HTMLParagraphElement;
+
+    const rangeA = document.createRange();
+    rangeA.selectNodeContents(pA);
+    const scopeA = applyHighlight(rangeA, pA.textContent!, [
+      { text: "Paragraph A chunk 0. ", startOffset: 0, endOffset: 21 },
+      { text: "Paragraph A chunk 1.", startOffset: 21, endOffset: 41 },
+    ], "scope-A");
+
+    const rangeB = document.createRange();
+    rangeB.selectNodeContents(pB);
+    const scopeB = applyHighlight(rangeB, pB.textContent!, [
+      { text: "Paragraph B chunk 0. ", startOffset: 0, endOffset: 21 },
+      { text: "Paragraph B chunk 1.", startOffset: 21, endOffset: 41 },
+    ], "scope-B");
+
+    expect(scopeA).toBe("scope-A");
+    expect(scopeB).toBe("scope-B");
+
+    // 朗读 Paragraph B 的 chunk 0：只激活 paraB 中的 chunk 0，paraA 的下划线绝不跳动！
+    setActiveHighlightChunk(doc, 0, "scope-B");
+
+    const spansA = pA.querySelectorAll(".chunkly-chunk");
+    const spansB = pB.querySelectorAll(".chunkly-chunk");
+
+    expect(spansA[0].classList.contains("chunkly-chunk-active")).toBe(false);
+    expect(spansA[1].classList.contains("chunkly-chunk-active")).toBe(false);
+
+    expect(spansB[0].classList.contains("chunkly-chunk-active")).toBe(true);
+    expect(spansB[1].classList.contains("chunkly-chunk-active")).toBe(false);
+
+    // 朗读推进到 Paragraph B 的 chunk 1
+    setActiveHighlightChunk(doc, 1, "scope-B");
+    expect(spansA[0].classList.contains("chunkly-chunk-active")).toBe(false);
+    expect(spansA[1].classList.contains("chunkly-chunk-active")).toBe(false);
+    expect(spansB[0].classList.contains("chunkly-chunk-active")).toBe(false);
+    expect(spansB[1].classList.contains("chunkly-chunk-active")).toBe(true);
+  });
+
+  it("高亮元素包含正确的调色盘轮换类名且不覆盖宿主文字语义", () => {
+    document.body.innerHTML = "<p id='p'>First chunk second chunk third chunk fourth chunk fifth chunk</p>";
+    const p = document.getElementById("p") as HTMLParagraphElement;
+    const text = p.textContent!;
+
+    const splits = ["First chunk", " second chunk", " third chunk", " fourth chunk", " fifth chunk"];
+    const range = document.createRange();
+    range.selectNodeContents(p);
+
+    applyHighlight(range, text, chunksFor(text, splits));
+
+    const spans = p.querySelectorAll<HTMLSpanElement>(".chunkly-chunk");
+    expect(spans.length).toBe(5);
+
+    // 调色盘从 0 到 3 循环
+    expect(spans[0].classList.contains("chunkly-chunk-0")).toBe(true);
+    expect(spans[1].classList.contains("chunkly-chunk-1")).toBe(true);
+    expect(spans[2].classList.contains("chunkly-chunk-2")).toBe(true);
+    expect(spans[3].classList.contains("chunkly-chunk-3")).toBe(true);
+    expect(spans[4].classList.contains("chunkly-chunk-0")).toBe(true);
   });
 });

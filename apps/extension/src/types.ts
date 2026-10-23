@@ -21,16 +21,22 @@ import type { ProviderConfig } from "@chunkly/engine";
 export const OFFICIAL_BASE_URL = "https://api.commandcode.ai/provider/v1";
 
 /**
- * 官方模式下可选的模型（CommandCode 直连，2026-10-21 实测均可用）。
+ * 官方模式下可选的模型（CommandCode 直连，实测 DeepSeek 切分质量最优）。
  *
- * 只给三个，不给自由输入：新用户不会填错一个不存在的模型名而卡在报错上。
+ * 官方精简预设，不给自由输入：新用户不会填错一个不存在的模型名而卡在报错上。
  * 想试别的模型的人可以走「自定义」——那里可以填任意地址和模型名。
  */
 export const OFFICIAL_MODELS = [
   {
+    id: "deepseek/deepseek-v4.1-flash",
+    label: "DeepSeek V4.1 Flash",
+    note: "默认 · 意群切分效果最优",
+    effort: "off",
+  },
+  {
     id: "z-ai/glm-5.3-flash",
     label: "GLM-5.3 Flash",
-    note: "默认",
+    note: "极速响应",
     /**
      * 不支持 off —— 传 off 会 HTTP 400
      * `Model "z-ai/glm-5.3-flash" does not support reasoning_effort`
@@ -38,24 +44,10 @@ export const OFFICIAL_MODELS = [
      */
     effort: "low",
   },
-  {
-    id: "deepseek/deepseek-v4.1-flash",
-    label: "DeepSeek V4.1 Flash",
-    note: "切分更细，约 3–4 词/意群",
-    /** 三个模型里唯一明确接受 off 的 */
-    effort: "off",
-  },
-  {
-    id: "gpt-5.6-luna",
-    label: "GPT-5.6 Luna",
-    note: "粒度居中，约 4 词/意群",
-    /** 同 glm，不支持 off */
-    effort: "low",
-  },
 ] as const;
 
-/** 默认模型：按用户指定，glm-5.3-flash */
-export const DEFAULT_OFFICIAL_MODEL: OfficialModelId = "z-ai/glm-5.3-flash";
+/** 默认模型：DeepSeek V4.1 Flash（意群切分质量最优） */
+export const DEFAULT_OFFICIAL_MODEL: OfficialModelId = "deepseek/deepseek-v4.1-flash";
 
 /** 取某个模型对应的最优 reasoning_effort；未知模型返回 undefined（不传）。 */
 export function effortForModel(model: string): string | undefined {
@@ -64,10 +56,21 @@ export function effortForModel(model: string): string | undefined {
 
 export type OfficialModelId = (typeof OFFICIAL_MODELS)[number]["id"];
 
+/**
+ * 意群视觉呈现风格：
+ * - highlighter: 经典莫兰迪实体荧光笔（默认）
+ * - underline: 极简清晰下划线（无底色干扰）
+ */
+export type HighlightStyle = "highlighter" | "underline";
+
 export interface StoredSettings {
   /** "official" 用官方端点（只选模型）；"custom" 全部自己填 */
   mode: "official" | "custom";
   provider: ProviderConfig;
+  /** 划词悬浮按钮：划选文本后是否显示浮动 Chunk 按钮 */
+  showBubbleTrigger?: boolean;
+  /** 高亮视觉风格偏好 */
+  highlightStyle?: HighlightStyle;
 }
 
 /**
@@ -79,6 +82,8 @@ export interface StoredSettings {
 export const DEFAULT_SETTINGS: StoredSettings = {
   mode: "official",
   provider: { baseURL: OFFICIAL_BASE_URL, apiKey: "", model: DEFAULT_OFFICIAL_MODEL },
+  showBubbleTrigger: true,
+  highlightStyle: "highlighter",
 };
 
 /**

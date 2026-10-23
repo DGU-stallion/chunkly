@@ -279,6 +279,75 @@
 
       .hidden { display: none !important; }
 
+      /* ---------- 高亮风格卡片 ---------- */
+      .style-cards {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .style-card {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        padding: 14px 16px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        cursor: pointer;
+        background: var(--surface-2);
+        transition: border-color .15s, background .15s;
+      }
+      .style-card:hover {
+        border-color: var(--line-strong);
+      }
+      .style-card:has(input:checked) {
+        border-color: var(--brand);
+        background: var(--surface);
+      }
+      .style-card input[type="radio"] {
+        margin-top: 3px;
+        accent-color: var(--brand);
+      }
+      .style-card-content { flex: 1; }
+      .style-card-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 2px;
+      }
+      .style-card-title {
+        font-weight: 600;
+        font-size: 13.5px;
+      }
+      .style-card-tag {
+        font-size: 10px;
+        padding: 1px 5px;
+        border-radius: 4px;
+        background: var(--brand-soft);
+        color: var(--brand);
+        font-weight: 600;
+      }
+      .style-card-desc {
+        font-size: 12px;
+        color: var(--fg-2);
+        margin: 0 0 8px;
+      }
+      .style-preview {
+        padding: 6px 10px;
+        border-radius: 6px;
+        background: var(--surface);
+        border: 1px dashed var(--line);
+        font-size: 12.5px;
+      }
+      .preview-highlighter .sample-0 { background: rgba(254, 243, 199, 0.9); color: #78350F; padding: 1px 3px; border-radius: 3px; margin: 0 1px; }
+      .preview-highlighter .sample-1 { background: rgba(224, 242, 254, 0.9); color: #0369A1; padding: 1px 3px; border-radius: 3px; margin: 0 1px; }
+      .preview-highlighter .sample-2 { background: rgba(220, 252, 231, 0.9); color: #15803D; padding: 1px 3px; border-radius: 3px; margin: 0 1px; }
+
+      .preview-underline .sample-0 { border-bottom: 2.5px solid #D97706; padding: 1px 2px; margin: 0 1px; }
+      .preview-underline .sample-1 { border-bottom: 2.5px solid #0284C7; padding: 1px 2px; margin: 0 1px; }
+      .preview-underline .sample-2 { border-bottom: 2.5px solid #16A34A; padding: 1px 2px; margin: 0 1px; }
+
+
+
       footer {
         margin-top: 32px;
         padding-top: 20px;
@@ -301,7 +370,7 @@
     <div class="wrap">
       <div class="hero">
         <h1>Chunkly</h1>
-        <p>英文网页意群切分。选中文本后按 <kbd id="hotkey">⌘⇧C</kbd> 即可。</p>
+        <p>英文网页意群切分。选中文本后按 <kbd id="hotkey">⌥⇧C</kbd> 即可。</p>
       </div>
 
       <!-- 模式 -->
@@ -327,7 +396,7 @@
           <div class="field">
             <label>模型</label>
             <div class="models" id="modelList"></div>
-            <p class="help">官方模式已内置额度，不需要填写 API Key。</p>
+            <p class="help">官方模式已内置推荐模型。若在开源版或未配额度时，请切换至「自定义」填入自己的 API Key。</p>
           </div>
         </div>
 
@@ -335,7 +404,7 @@
         <div id="customPane" class="hidden">
           <div class="field">
             <label for="customBaseURL">API 地址</label>
-            <input id="customBaseURL" type="text" spellcheck="false" placeholder="https://api.example.com/v1" />
+            <input id="customBaseURL" type="text" spellcheck="false" placeholder="https://api.deepseek.com/v1" />
             <p class="help">OpenAI 兼容接口的根地址，需支持 <code>/chat/completions</code>。</p>
           </div>
           <div class="field">
@@ -347,8 +416,62 @@
           </div>
           <div class="field">
             <label for="customModel">模型名称</label>
-            <input id="customModel" type="text" spellcheck="false" placeholder="gpt-4o-mini" />
+            <input id="customModel" type="text" spellcheck="false" placeholder="deepseek-chat" />
           </div>
+        </div>
+      </div>
+
+      <!-- 高亮视觉风格 -->
+      <div class="card">
+        <h2>高亮视觉风格</h2>
+        <p class="desc">选择最契合你阅读习惯的意群呈现方式，支持即时预览。</p>
+
+        <div class="style-cards" id="styleCardList">
+          <label class="style-card">
+            <input type="radio" name="highlightStyle" value="highlighter" checked />
+            <div class="style-card-content">
+              <div class="style-card-header">
+                <span class="style-card-title">经典实体荧光笔</span>
+                <span class="style-card-tag">默认</span>
+              </div>
+              <p class="style-card-desc">莫兰迪纸质调色盘，底色鲜明，已修复划词选区重叠混色。</p>
+              <div class="style-preview preview-highlighter">
+                <span class="chunk-sample sample-0">In early morning</span>
+                <span class="chunk-sample sample-1">the stock market</span>
+                <span class="chunk-sample sample-2">surged rapidly</span>
+              </div>
+            </div>
+          </label>
+
+          <label class="style-card">
+            <input type="radio" name="highlightStyle" value="underline" />
+            <div class="style-card-content">
+              <div class="style-card-header">
+                <span class="style-card-title">极简清晰下划线</span>
+              </div>
+              <p class="style-card-desc">纯净无色块干扰，采用醒目彩线下划线标注意群边界。</p>
+              <div class="style-preview preview-underline">
+                <span class="chunk-sample sample-0">In early morning</span>
+                <span class="chunk-sample sample-1">the stock market</span>
+                <span class="chunk-sample sample-2">surged rapidly</span>
+              </div>
+            </div>
+          </label>
+
+
+        </div>
+      </div>
+
+      <!-- 交互偏好 -->
+      <div class="card">
+        <h2>交互设置</h2>
+        <p class="desc">划选英文文本时的辅助提示与触发行为。</p>
+        <div class="field" style="display: flex; align-items: center; justify-content: space-between;">
+          <div>
+            <label for="showBubbleTrigger" style="margin-bottom: 2px;">划词悬浮气泡 (✨ Chunk)</label>
+            <p class="help" style="margin: 0;">选中文本后在光标附近展示悬浮按钮，点击直接切分，无需按快捷键。</p>
+          </div>
+          <input type="checkbox" id="showBubbleTrigger" style="width: 18px; height: 18px; cursor: pointer;" />
         </div>
       </div>
 

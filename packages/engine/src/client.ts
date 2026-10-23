@@ -75,7 +75,63 @@ export async function callChatCompletions(
   }
 
   if (!response.ok) {
-    throw mapHttpError(response.status, await safeReadText(response));
+    const errorText = await safeReadText(response);
+
+    // 弹性自愈 1：如果是 reasoning_effort 引起的 400，自动剔除该优化参数重试一次
+    if (
+      response.status === 400 &&
+      requestBody.reasoning_effort &&
+      (errorText.includes("reasoning_effort") || errorText.includes("unsupported_value"))
+    ) {
+      delete requestBody.reasoning_effort;
+      try {
+        const retryResp = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${provider.apiKey}`,
+          },
+          body: JSON.stringify(requestBody),
+          signal: combineSignals(signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)),
+        });
+        if (retryResp.ok) {
+          const body = await retryResp.json();
+          return extractMessage(body);
+        }
+      } catch {
+        // 重试失败时继续向下抛出原始错误
+      }
+    }
+
+    // 弹性自愈 2：如果是 response_format 引起的 400（例如某些本地/开源网关不支持严格 json_object），剔除后重试
+    if (
+      response.status === 400 &&
+      requestBody.response_format &&
+      (errorText.includes("response_format") ||
+        errorText.includes("json_object") ||
+        errorText.includes("text.format"))
+    ) {
+      delete requestBody.response_format;
+      try {
+        const retryResp = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${provider.apiKey}`,
+          },
+          body: JSON.stringify(requestBody),
+          signal: combineSignals(signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)),
+        });
+        if (retryResp.ok) {
+          const body = await retryResp.json();
+          return extractMessage(body);
+        }
+      } catch {
+        // 继续向下抛
+      }
+    }
+
+    throw mapHttpError(response.status, errorText);
   }
 
   let body: unknown;

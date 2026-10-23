@@ -15,6 +15,7 @@ import {
   OFFICIAL_MODELS,
   isOfficialModel,
   type StoredSettings,
+  type HighlightStyle,
 } from "./types.js";
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
@@ -26,6 +27,7 @@ const modelList = $<HTMLDivElement>("modelList");
 const customBaseURLInput = $<HTMLInputElement>("customBaseURL");
 const customApiKeyInput = $<HTMLInputElement>("customApiKey");
 const customModelInput = $<HTMLInputElement>("customModel");
+const showBubbleCheckbox = $<HTMLInputElement>("showBubbleTrigger");
 const statusEl = $<HTMLDivElement>("status");
 const bannerEl = $<HTMLDivElement>("banner");
 const bannerText = $<HTMLSpanElement>("bannerText");
@@ -111,10 +113,10 @@ function hideBanner(): void {
   bannerEl.className = "banner err hidden";
 }
 
-/** 根据平台显示快捷键（mac 显示 ⌘⇧C，其他显示 Ctrl+Shift+C） */
+/** 根据平台显示快捷键（mac 显示 ⌥⇧C，其他显示 Alt+Shift+C） */
 function renderHotkey(): void {
   const isMac = navigator.platform.toLowerCase().includes("mac");
-  hotkeyEl.textContent = isMac ? "⌘⇧C" : "Ctrl+Shift+C";
+  hotkeyEl.textContent = isMac ? "⌥⇧C" : "Alt+Shift+C";
 }
 
 async function init(): Promise<void> {
@@ -122,6 +124,15 @@ async function init(): Promise<void> {
 
   const settings = await loadSettings();
   setMode(settings.mode);
+
+  if (showBubbleCheckbox) {
+    showBubbleCheckbox.checked = settings.showBubbleTrigger ?? true;
+  }
+
+  const highlightStyleRadios = document.querySelectorAll<HTMLInputElement>('input[name="highlightStyle"]');
+  highlightStyleRadios.forEach((r) => {
+    r.checked = r.value === (settings.highlightStyle ?? "highlighter");
+  });
 
   renderModels(settings.provider.model);
 
@@ -134,6 +145,9 @@ async function init(): Promise<void> {
 
 function collectSettings(): StoredSettings {
   const mode = currentMode();
+  const showBubbleTrigger = showBubbleCheckbox ? showBubbleCheckbox.checked : true;
+  const checkedStyle = document.querySelector<HTMLInputElement>('input[name="highlightStyle"]:checked');
+  const highlightStyle = (checkedStyle?.value as HighlightStyle) ?? "highlighter";
 
   if (mode === "official") {
     return {
@@ -146,6 +160,8 @@ function collectSettings(): StoredSettings {
         // 尊重用户选的模型（这是之前保存不上的那个 bug）
         model: selectedModel(),
       },
+      showBubbleTrigger,
+      highlightStyle,
     };
   }
 
@@ -156,6 +172,8 @@ function collectSettings(): StoredSettings {
       apiKey: customApiKeyInput.value.trim(),
       model: customModelInput.value.trim(),
     },
+    showBubbleTrigger,
+    highlightStyle,
   };
 }
 
@@ -239,36 +257,31 @@ async function handleTest(): Promise<void> {
   setStatus("测试中…", "");
   hideBanner();
 
-  const startedAt = Date.now();
   try {
-    const response = await fetch(
-      settings.provider.baseURL.replace(/\/+$/, "") + "/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${settings.provider.apiKey}`,
-        },
-        // 不传推理相关参数：各模型走自己的默认（实测这个取舍因模型而异，
-        // 统一不设比设一个"看起来更快"的值更靠谱）
-        body: JSON.stringify({
-          model: settings.provider.model,
-          messages: [{ role: "user", content: "hi" }],
-          max_tokens: 4,
-          temperature: 0,
-        }),
+    const res = await new Promise<{ ok: boolean; elapsed?: number; error?: string }>(
+      (resolve) => {
+        chrome.runtime.sendMessage(
+          { type: "TEST_CONNECTION", settings },
+          (response) => {
+            if (chrome.runtime.lastError) {
+              resolve({
+                ok: false,
+                error: `后台连接失败：${chrome.runtime.lastError.message}`,
+              });
+            } else {
+              resolve(response || { ok: false, error: "未收到响应" });
+            }
+          }
+        );
       }
     );
 
-    const elapsed = Date.now() - startedAt;
-    const text = await response.text().catch(() => "");
-
-    if (response.ok) {
-      setStatus(`连接正常（${elapsed}ms）`, "ok");
+    if (res.ok) {
+      setStatus(`连接正常（${res.elapsed ?? 0}ms）`, "ok");
       return;
     }
 
-    const detail = describeFailure(response.status, text, settings.provider.baseURL);
+    const detail = res.error || "请求失败";
     setStatus(detail, "err");
     showBanner(detail, "err");
   } catch (err) {
@@ -279,40 +292,6 @@ async function handleTest(): Promise<void> {
   } finally {
     testButton.disabled = false;
     saveButton.disabled = false;
-  }
-}
-
-/**
- * 把 HTTP 失败翻译成「用户该去改什么」。
- *
- * 401 通常**不是 Key 本身无效**，而是 Key 与地址不属于同一家服务。
- * 直接说「Key 无效」会把用户引向错误的排查方向（我自己就被这条提示误导过）。
- */
-function describeFailure(status: number, bodyText: string, baseURL: string): string {
-  const snippet = bodyText.slice(0, 140).replace(/\s+/g, " ").trim();
-  const host = safeHost(baseURL);
-  const tail = snippet ? ` 详情：${snippet}` : "";
-
-  if (status === 401 || status === 403) {
-    return `鉴权失败（${status}）。请确认这个 Key 属于 ${host} —— Key 与地址必须来自同一家服务。${tail}`;
-  }
-  if (status === 404) {
-    return `地址不存在（404）。检查 API 地址是否漏了路径，例如应形如 …/provider/v1。${tail}`;
-  }
-  if (status === 429) {
-    return `触发限流（429）。稍后再试。${tail}`;
-  }
-  if (status >= 500) {
-    return `服务端错误（${status}）。不是你的配置问题，稍后重试。${tail}`;
-  }
-  return `请求失败（${status}）。${tail}`;
-}
-
-function safeHost(url: string): string {
-  try {
-    return new URL(url).host;
-  } catch {
-    return "该地址";
   }
 }
 

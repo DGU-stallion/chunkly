@@ -236,6 +236,38 @@ describe("thinking 字段仅对 GLM provider 附加", () => {
     const sentBody = JSON.parse(fetchMock.mock.calls[0][1].body as string);
     expect(sentBody.thinking).toBeUndefined();
   });
+
+  it("当服务端因 reasoning_effort 返回 400 时，能自动剔除该参数重试并成功", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        text: async () => '{"error":{"message":"Model does not support reasoning_effort off"}}',
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => openAiChatBody(JSON.stringify({ chunks: ["hello"] })),
+        text: async () => "",
+      } as Response);
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await chunk("hello", {
+      provider,
+      reasoningEffort: "off",
+    });
+
+    expect(result.chunks[0].text).toBe("hello");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // 第一次带了 reasoning_effort
+    const body1 = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body1.reasoning_effort).toBe("off");
+    // 第二次自愈重试剔除了 reasoning_effort
+    const body2 = JSON.parse(fetchMock.mock.calls[1][1].body as string);
+    expect(body2.reasoning_effort).toBeUndefined();
+  });
 });
 
 describe("分段并发", () => {

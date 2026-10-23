@@ -1,10 +1,18 @@
 /**
  * 意群切分的 prompt 构造。
  *
- * 设计约束：不要求 LLM 输出数字 offset（LLM 数字符位置不可靠），
- * 而是要求它输出「按意群分割后的原文子串数组」——LLM 只需要在原文中
- * 插入分割点，不需要改写或复述文本。engine 侧再用逐段顺序查找的方式
- * 把这些子串定位回原文的 startOffset/endOffset。
+ * 理论根基与设计原则（基于 SLA 二语习得与认知心理学）：
+ * 1. Judy B. Gilbert（剑桥大学出版社《Clear Speech》）：韵律金字塔（Prosody Pyramid）与 Thought Groups（语调/思想意群）。
+ *    - 每一个 Thought Group 表达一个统一的概念单元，包含一个核心焦点词（Focus Word），并在末尾自然停顿/微换气。
+ * 2. Timothy Rasinski（阅读流利度权威）：Phrase-cued Text（意群线索文本）实证。
+ *    - 阅读流利度 = 准确度 + 自动化 + 韵律断句（Prosody）。
+ *    - 视觉意群切分让读者的默读内语（Inner Speech / Subvocal Prosody）与母语口语节奏同步，
+ *      从而在大脑中打通「Read ↔ Speak ↔ Listen」的语音回路，防止逐词解码（Word-by-word decoding）导致认知过载。
+ *
+ * 工程契约：
+ * 1. 严格无损：所有 chunk 拼接必须逐字符完全等于原文；
+ * 2. 颗粒度：通常为 2 至 5 个词，天然契合人类工作记忆（Cowan 4±1）与口语呼吸节奏；
+ * 3. 语义紧凑：紧密搭配、短语动词、复合词严禁撕裂。
  */
 
 export interface PromptGranularity {
@@ -12,27 +20,43 @@ export interface PromptGranularity {
 }
 
 const GRANULARITY_HINT: Record<"fine" | "coarse", string> = {
-  fine: "Prefer finer-grained chunking: also split at natural secondary pause points within a phrase.",
-  coarse: "Prefer coarser-grained chunking: only split at major phrase boundaries, avoid over-fragmenting.",
+  fine: "Granularity: finer-grained thought groups (typically 2-4 words). Also split at secondary syntactic pause points.",
+  coarse: "Granularity: broader thought groups (typically 4-6 words). Split only at major syntactic and clausal boundaries.",
 };
 
 export function buildSystemPrompt(): string {
   return [
-    "You are an assistant that splits English text into phrase chunks for language learners.",
+    "You are an expert English reading and pronunciation coach specializing in Thought Groups (natural sense units) for language learners.",
     "",
-    "Goal: split the text the way a native speaker would naturally group words when speaking it aloud — " +
-      "at the same boundaries where a fluent speaker would pause, breathe, or shift intonation (prosodic units), " +
-      "not by grammar rules alone and not word-by-word.",
-    "The purpose is to let the reader's eye movement match a listener's ear: each chunk should be a unit the " +
-      "reader can grasp and remember as one piece of meaning, so reading trains the same chunk-level processing " +
-      "used in listening comprehension, instead of decoding one word at a time.",
+    "Goal:",
+    "Partition the input text into natural Thought Groups (intonation units / sense chunks) exactly as a fluent native speaker would group words when reading aloud or speaking with natural rhythm, cadence, and breath pauses.",
     "",
-    "Strict rules:",
-    "1. Only insert split points into the original text. Never add, remove, rewrite, or replace any character " +
-      "(including whitespace, punctuation, or letter case).",
-    "2. Concatenating all chunks in order must reproduce the original text exactly, character for character " +
-      "(whitespace between chunks must be included inside one of the chunks, never dropped).",
-    '3. Output only JSON in the form {"chunks": ["chunk1", "chunk2", ...]}. No explanation or extra text.',
+    "Key Phrasing Principles:",
+    "1. Meaningful Cadence (Typically 3 to 6 words):",
+    "   - A Thought Group must express a unified, coherent piece of meaning.",
+    "   - AVOID OVER-FRAGMENTATION: Never chop text into tiny 1-2 word fragments (e.g. NEVER make isolated chunks out of 'argued that', 'in Nature', or 'the findings').",
+    "   - AVOID RUN-ONS: Break long compound/complex sentences at natural pause points so each chunk is comfortable for working memory.",
+    "2. Inseparable Semantic Units (DO NOT SPLIT):",
+    "   - Keep verbs with their particles, prepositions, and short complements (e.g., 'look at the pictures', 'come up with a plan', 'pointed out that').",
+    "   - Keep short prepositional modifiers with their head noun or verb (e.g., 'published in Nature last week', 'walked to school').",
+    "   - Keep compound nouns, proper names, and fixed collocations intact (e.g., 'artificial intelligence', 'climate change', 'United States').",
+    "   - Never isolate a determiner/article or conjunction (e.g., never separate 'the' or 'of').",
+    "3. Where to Pause / Split:",
+    "   - At punctuation marks (commas, dashes, semicolons, colons).",
+    "   - Before clauses or coordinating conjunctions connecting distinct thoughts (e.g., 'because...', 'although...', 'and...', 'but...').",
+    "   - Between a long complex subject and its predicate.",
+    "",
+    "Few-Shot Reference Examples:",
+    "- Input: 'Microsoft CEO Satya Nadella announced the acquisition of the London-based startup yesterday morning.'",
+    '  Output: {"chunks": ["Microsoft CEO Satya Nadella ", "announced the acquisition ", "of the London-based startup ", "yesterday morning."]}',
+    "- Input: 'The researchers who conducted the study, which was published in Nature last week, argued that the findings could revolutionize cancer treatment.'",
+    '  Output: {"chunks": ["The researchers who conducted the study, ", "which was published in Nature last week, ", "argued that the findings ", "could revolutionize cancer treatment."]}',
+    "- Input: 'Before we run out of time, I would like to point out that we must come up with a realistic plan to deal with climate change.'",
+    '  Output: {"chunks": ["Before we run out of time, ", "I would like to point out ", "that we must come up with a realistic plan ", "to deal with climate change."]}',
+    "",
+    "Strict Output Rules:",
+    "1. Lossless Preservation: Output strictly JSON in the form {\"chunks\": [\"chunk1\", \"chunk2\", ...]}. Concatenating all chunks in order must reproduce the original text character-for-character, including all spaces and punctuation. Do NOT add, delete, or alter any character.",
+    "2. No markdown wrappers or conversational filler outside the JSON.",
   ].join("\n");
 }
 

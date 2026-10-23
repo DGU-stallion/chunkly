@@ -1,27 +1,72 @@
 /**
- * 高亮渲染。
+ * 高亮渲染：将意群切分结果映射到网页 DOM。
  *
- * `computeSegments` 是纯逻辑（可单测）；`applyHighlight` / `undoHighlight` 操作真实 DOM。
- *
- * 硬约束（ADR-0001）：**高亮不得销毁宿主页面原有的文本节点**。
- * 早期实现用 `range.deleteContents() + insertNode()` 整块替换选区内容，会把原始
- * Text 节点删掉——后果是无法撤销，且让 React/Vue 这类受控渲染框架持有的节点引用失效。
- *
- * 现在的做法：把文本节点按 chunk 边界 `splitText()` 切开，再用 `<span>` 包裹目标片段。
- * 文本节点本身始终留在 DOM 里，因此撤销可以真正无损。
+ * 1. 优先采用现代 Web 标准：CSS Custom Highlight API（无 DOM 侵入）；
+ * 2. 传统 DOM 回退模式：splitText + span 包裹（ADR-0001 路径，不销毁原始文本）；
+ * 3. 严格守卫「无损」契约与「零认知干扰」：不强加冗余手柄，专注于沉浸式阅读。
  */
 import type { Chunk } from "@chunkly/engine";
 
 export interface Segment {
   text: string;
-  /** 落在某个 chunk 内则为该 chunk 在数组中的下标（用于交替配色），否则为 null（未覆盖的空隙，原样展示不高亮） */
   chunkIndex: number | null;
 }
 
+export const PALETTE_SIZE = 4;
+export const HIGHLIGHT_CLASS_PREFIX = "chunkly-chunk";
+export const ACTIVE_CLASS = "chunkly-chunk-active";
+
 /**
- * 假设 chunks 已按 startOffset 升序、且互不重叠（engine 的顺序游标查找保证了这一点）。
- * 用于把整段文本拆分成「属于某个 chunk」或「不属于任何 chunk（空隙）」的连续片段。
+ * 设置当前发音激活的意群（卡拉OK同步高亮）。
+ * @param container 容器元素
+ * @param chunkIndex 激活的意群下标，传 null 清除全部激活状态
+ * @param scopeId 可选的作用域实例 ID，只激活该段落内的意群，绝不波及其他已切分段落
  */
+export function setActiveHighlightChunk(
+  container: ParentNode,
+  chunkIndex: number | null,
+  scopeId?: string | null
+): void {
+  // 1. CSS Custom Highlight API 模式
+  if (isHighlightApiSupported()) {
+    const registry = getHighlightRegistry();
+    const HighlightCtor = getHighlightConstructor();
+    if (registry) {
+      if (chunkIndex === null) {
+        registry.delete("chunkly-active");
+      } else {
+        const activeRanges = activeHighlightRecords
+          .filter(
+            (r) => r.chunkIndex === chunkIndex && (!scopeId || r.scopeId === scopeId)
+          )
+          .map((r) => r.range);
+        if (activeRanges.length > 0 && HighlightCtor) {
+          const highlight = new HighlightCtor(...activeRanges);
+          registry.set("chunkly-active", highlight);
+        } else {
+          registry.delete("chunkly-active");
+        }
+      }
+    }
+  }
+
+  // 2. DOM span 模式
+  const spans = Array.from(
+    container.querySelectorAll<HTMLElement>(`.${HIGHLIGHT_CLASS_PREFIX}`)
+  );
+  for (const span of spans) {
+    const idx = span.dataset.chunkIndex ? parseInt(span.dataset.chunkIndex, 10) : -1;
+    const spanScope = span.dataset.scopeId;
+    const matchesScope = !scopeId || spanScope === scopeId;
+
+    if (chunkIndex !== null && idx === chunkIndex && matchesScope) {
+      span.classList.add(ACTIVE_CLASS);
+    } else {
+      span.classList.remove(ACTIVE_CLASS);
+    }
+  }
+}
+
 export function computeSegments(fullText: string, chunks: Chunk[]): Segment[] {
   const segments: Segment[] = [];
   let cursor = 0;
@@ -41,32 +86,62 @@ export function computeSegments(fullText: string, chunks: Chunk[]): Segment[] {
   return segments.filter((s) => s.text.length > 0);
 }
 
-const HIGHLIGHT_CLASS_PREFIX = "chunkly-chunk";
-const PALETTE_SIZE = 4;
-
-/** 一个文本节点里需要被包裹的片段（相对于该节点 data 的偏移） */
 interface Piece {
   offset: number;
   length: number;
   chunkIndex: number;
 }
 
-/** 一个文本节点在选区里的占位信息 */
 interface CoveredNode {
   node: Text;
-  /** 该节点在**选区坐标系**里的起始 offset */
   startOffset: number;
-  /** 该节点在**自身 data** 里的起始位置（部分选区时 > 0） */
   inNodeFrom: number;
 }
 
-/**
- * 把「全文 offset」的 segment 列表映射成「每个文本节点内部的片段」。
- *
- * 两个坐标系必须区分清楚，否则部分选区会整体错位：
- * - segment 用的是**选区坐标系**（从选区起点算）；
- * - splitText 用的是**节点自身坐标系**（从 node.data[0] 算）。
- */
+function addSanitizedPieces(
+  targetPieces: Piece[],
+  node: Text,
+  rawOffset: number,
+  rawLength: number,
+  chunkIndex: number
+): void {
+  const rawText = node.data.slice(rawOffset, rawOffset + rawLength);
+  if (!/[\r\n]/.test(rawText)) {
+    // 单行文本：只要不是纯空白，就作为独立 piece
+    if (rawText.trim().length > 0) {
+      targetPieces.push({ offset: rawOffset, length: rawLength, chunkIndex });
+    }
+    return;
+  }
+
+  // 跨行/换行文本：严格按换行符切分，只提取包含真实英文字符的行内片段
+  const lineRegex = /[^\r\n]+/g;
+  let match: RegExpExecArray | null;
+  while ((match = lineRegex.exec(rawText)) !== null) {
+    const matchedLine = match[0];
+    const matchStartInRaw = match.index;
+
+    // 去除行末可能连带的尾部多余空白（避免高亮延伸到行尾空白处）
+    const trimmedEnd = matchedLine.replace(/\s+$/, "");
+    if (trimmedEnd.trim().length === 0) {
+      continue;
+    }
+
+    // 如果片段开头有空白且紧贴换行，去除行首空白
+    const leadingSpaces = trimmedEnd.match(/^\s*/)?.[0].length ?? 0;
+    const cleanLength = trimmedEnd.length - leadingSpaces;
+    if (cleanLength <= 0) {
+      continue;
+    }
+
+    targetPieces.push({
+      offset: rawOffset + matchStartInRaw + leadingSpaces,
+      length: cleanLength,
+      chunkIndex,
+    });
+  }
+}
+
 function planPieces(covered: CoveredNode[], segments: Segment[]): Map<Text, Piece[]> {
   const plan = new Map<Text, Piece[]>();
 
@@ -80,57 +155,27 @@ function planPieces(covered: CoveredNode[], segments: Segment[]): Map<Text, Piec
         const overlapStart = Math.max(segStart, nodeStart);
         const overlapEnd = Math.min(segEnd, nodeEnd);
         if (overlapEnd > overlapStart) {
+          const rawOffset = inNodeFrom + (overlapStart - nodeStart);
+          const rawLength = overlapEnd - overlapStart;
           const pieces = plan.get(node) ?? [];
-          pieces.push({
-            // 选区坐标 -> 节点坐标
-            offset: inNodeFrom + (overlapStart - nodeStart),
-            length: overlapEnd - overlapStart,
-            chunkIndex: segment.chunkIndex,
-          });
-          plan.set(node, pieces);
+          addSanitizedPieces(pieces, node, rawOffset, rawLength, segment.chunkIndex);
+          if (pieces.length > 0) {
+            plan.set(node, pieces);
+          }
         }
       }
     }
     segStart = segEnd;
   }
 
+  for (const [, pieces] of plan) {
+    pieces.sort((a, b) => a.offset - b.offset);
+  }
+
   return plan;
 }
 
-/**
- * 在真实 DOM 上应用高亮。
- *
- * @param range 用户选区（决定要处理哪棵子树）
- * @param fullText 选区文本（chunk offset 的坐标系）
- * @param chunks engine 返回的意群
- */
-export function applyHighlight(range: Range, fullText: string, chunks: Chunk[]): void {
-  const segments = computeSegments(fullText, chunks);
-  if (segments.length === 0) return;
-
-  const covered = collectTextNodes(range);
-  if (covered.length === 0) return;
-
-  const plan = planPieces(covered, segments);
-
-  for (const [node, pieces] of plan) {
-    // 从后往前处理：每次 splitText 只影响该片段之后的部分，
-    // 因此前面的 offset 始终有效，不需要反复重算。
-    for (let i = pieces.length - 1; i >= 0; i--) {
-      wrapPiece(node, pieces[i]);
-    }
-  }
-}
-
-/**
- * 收集 Range 覆盖的所有文本节点，按文档顺序，并记录每个节点在
- * **选区坐标系**里的起始 offset。
- *
- * 关键点：部分选区时，首个/末个文本节点只有一部分在选区内。
- * 早期实现直接用 `node.data.length` 累加，导致选区从段中间开始时
- * 所有 offset 都往前错位（实测：选中 "CCC DDD" 却高亮了段首的 "AAA BBB"）。
- */
-function collectTextNodes(range: Range): CoveredNode[] {
+function collectTextNodes(range: Range, fullText?: string): CoveredNode[] {
   const container =
     range.commonAncestorContainer.nodeType === Node.TEXT_NODE
       ? range.commonAncestorContainer.parentNode
@@ -140,6 +185,7 @@ function collectTextNodes(range: Range): CoveredNode[] {
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
   const out: CoveredNode[] = [];
   let acc = 0;
+  let textSearchCursor = 0;
 
   let current = walker.nextNode() as Text | null;
   while (current) {
@@ -148,7 +194,16 @@ function collectTextNodes(range: Range): CoveredNode[] {
       const to = current === range.endContainer ? range.endOffset : current.data.length;
 
       if (to > from) {
-        out.push({ node: current, startOffset: acc, inNodeFrom: from });
+        const slice = current.data.slice(from, to);
+        let nodeStartOffset = acc;
+        if (typeof fullText === "string" && fullText.length > 0) {
+          const found = fullText.indexOf(slice, textSearchCursor);
+          if (found !== -1) {
+            nodeStartOffset = found;
+            textSearchCursor = found + slice.length;
+          }
+        }
+        out.push({ node: current, startOffset: nodeStartOffset, inNodeFrom: from });
         acc += to - from;
       }
     }
@@ -157,34 +212,168 @@ function collectTextNodes(range: Range): CoveredNode[] {
   return out;
 }
 
+interface HighlightRegistryLike {
+  set(name: string, highlight: unknown): void;
+  delete(name: string): boolean;
+  clear(): void;
+  has(name: string): boolean;
+}
+
+interface HighlightConstructorLike {
+  new (...ranges: Range[]): unknown;
+}
+
+function getHighlightRegistry(): HighlightRegistryLike | null {
+  if (typeof CSS !== "undefined" && "highlights" in CSS) {
+    const reg = (CSS as unknown as { highlights?: HighlightRegistryLike }).highlights;
+    return reg ?? null;
+  }
+  return null;
+}
+
+function getHighlightConstructor(): HighlightConstructorLike | null {
+  const g = globalThis as unknown as { Highlight?: HighlightConstructorLike };
+  return g.Highlight ?? null;
+}
+
+/** 是否支持 CSS Custom Highlight API */
+export function isHighlightApiSupported(): boolean {
+  return getHighlightRegistry() !== null && getHighlightConstructor() !== null;
+}
+
+export interface HighlightRecord {
+  range: Range;
+  chunkIndex: number;
+  highlightName: string;
+  scopeId?: string;
+}
+
+let activeHighlightRecords: HighlightRecord[] = [];
+
+function syncCssHighlights(): void {
+  const css = getHighlightRegistry();
+  const HighlightCtor = getHighlightConstructor();
+  if (!css || !HighlightCtor) return;
+
+  for (let i = 0; i < PALETTE_SIZE; i++) {
+    const name = `chunkly-${i}`;
+    const ranges = activeHighlightRecords
+      .filter((r) => r.highlightName === name)
+      .map((r) => r.range);
+
+    if (ranges.length > 0) {
+      css.set(name, new HighlightCtor(...ranges));
+    } else {
+      css.delete(name);
+    }
+  }
+}
+
+export function rangesOverlap(a: Range, b: Range): boolean {
+  try {
+    return (
+      a.compareBoundaryPoints(Range.START_TO_END, b) > 0 &&
+      a.compareBoundaryPoints(Range.END_TO_START, b) < 0
+    );
+  } catch {
+    return false;
+  }
+}
+
 /**
- * 用 span 包裹一个文本节点内的 [offset, offset+length)，不删除任何文本节点。
+ * 在真实网页上应用高亮。
  *
- * @param baseOffset 该节点在选区坐标系里的起点。piece.offset 是相对节点自身 data 的偏移。
+ * @param range 用户划选区域
+ * @param fullText 原文选区文本
+ * @param chunks 意群切分列表
+ * @param scopeId 可选的作用域实例 ID
+ * @returns 最终生效的 scopeId
  */
-function wrapPiece(node: Text, piece: Piece): void {
-  // 先切出目标片段之后的部分
+export function applyHighlight(
+  range: Range,
+  fullText: string,
+  chunks: Chunk[],
+  scopeId?: string
+): string {
+  const actualScopeId =
+    scopeId ?? `scope-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const segments = computeSegments(fullText, chunks);
+  if (segments.length === 0) return actualScopeId;
+
+  const covered = collectTextNodes(range, fullText);
+  if (covered.length === 0) return actualScopeId;
+
+  const plan = planPieces(covered, segments);
+
+  // 1. 现代模式：CSS Custom Highlight API
+  if (isHighlightApiSupported()) {
+    for (const [node, pieces] of plan) {
+      for (const piece of pieces) {
+        const r = new Range();
+        r.setStart(node, piece.offset);
+        r.setEnd(node, piece.offset + piece.length);
+        const name = `chunkly-${piece.chunkIndex % PALETTE_SIZE}`;
+        activeHighlightRecords.push({
+          range: r,
+          chunkIndex: piece.chunkIndex,
+          highlightName: name,
+          scopeId: actualScopeId,
+        });
+      }
+    }
+    syncCssHighlights();
+    return actualScopeId;
+  }
+
+  // 2. 回退模式：DOM 节点切割与 span 包裹（ADR-0001 路径）
+  for (const [node, pieces] of plan) {
+    for (let i = pieces.length - 1; i >= 0; i--) {
+      wrapPiece(node, pieces[i], actualScopeId);
+    }
+  }
+  return actualScopeId;
+}
+
+function wrapPiece(node: Text, piece: Piece, scopeId?: string): HTMLElement {
   if (piece.offset + piece.length < node.data.length) {
     node.splitText(piece.offset + piece.length);
   }
-  // 再把目标片段之前的部分切走，剩下的 node 就是目标片段
   const target = piece.offset > 0 ? node.splitText(piece.offset) : node;
 
   const span = document.createElement("span");
   span.className = `${HIGHLIGHT_CLASS_PREFIX} ${HIGHLIGHT_CLASS_PREFIX}-${
     piece.chunkIndex % PALETTE_SIZE
   }`;
+  span.dataset.chunkIndex = String(piece.chunkIndex);
+  if (scopeId) {
+    span.dataset.scopeId = scopeId;
+  }
 
   target.parentNode?.insertBefore(span, target);
   span.appendChild(target);
+  return span;
 }
 
 /**
- * 撤销容器内所有 Chunkly 高亮：移除 span 并 normalize，使被切开的文本节点重新合并。
- *
- * 因为 applyHighlight 从未删除过文本节点，这一步是真正无损的。
+ * 撤销高亮：同时清理 CSS Custom Highlight 与 DOM span。
  */
 export function undoHighlight(container: ParentNode): void {
+  // 清理 CSS Custom Highlight
+  if (isHighlightApiSupported()) {
+    if (container === document.body || (container as Node).contains(document.body)) {
+      activeHighlightRecords = [];
+    } else {
+      activeHighlightRecords = activeHighlightRecords.filter(
+        (r) => !container.contains(r.range.commonAncestorContainer)
+      );
+    }
+    syncCssHighlights();
+    if ("CSS" in window && "highlights" in (window as any).CSS) {
+      (window as any).CSS.highlights.delete("chunkly-active");
+    }
+  }
+
+  // 清理 DOM span
   const spans = Array.from(
     container.querySelectorAll<HTMLElement>(`.${HIGHLIGHT_CLASS_PREFIX}`)
   );
@@ -199,28 +388,27 @@ export function undoHighlight(container: ParentNode): void {
 }
 
 /**
- * 只撤销与给定 range 相交的高亮，保留页面上其他位置的高亮。
- *
- * 为什么需要它：切分第二段时不能清掉第一段。意群辅助的用法就是逐段读、
- * 回头对，清空整页等于强迫用户只能看一段（这是用户的真实反馈）。
- * 快捷键与右键菜单里的「清除高亮」仍用 undoHighlight(document.body) 整页清。
+ * 只撤销与给定 range 相交的高亮，保留其他区域的高亮。
  */
 export function undoHighlightInRange(range: Range): void {
-  const spans = Array.from(document.querySelectorAll<HTMLElement>(`.${HIGHLIGHT_CLASS_PREFIX}`)).filter(
-    (span) => range.intersectsNode(span)
-  );
+  // 清理 CSS Custom Highlight
+  if (isHighlightApiSupported()) {
+    activeHighlightRecords = activeHighlightRecords.filter(
+      (r) => !rangesOverlap(range, r.range)
+    );
+    syncCssHighlights();
+  }
+
+  // 清理 DOM span
+  const spans = Array.from(
+    document.querySelectorAll<HTMLElement>(`.${HIGHLIGHT_CLASS_PREFIX}`)
+  ).filter((span) => range.intersectsNode(span));
   if (spans.length === 0) return;
 
   const parents = unwrapSpans(spans);
   parents.forEach((p) => p.normalize());
 }
 
-/**
- * 把 span 的子节点（原始文本节点）挪回原位并删掉空 span，返回受影响的父节点。
- *
- * 不在这里 normalize：同一父节点下多个 span 都拆完后只需合一次，
- * 边拆边 normalize 会把后面还没处理的 span 里的节点搅乱。
- */
 function unwrapSpans(spans: HTMLElement[]): Set<Node> {
   const parents = new Set<Node>();
 
@@ -235,4 +423,13 @@ function unwrapSpans(spans: HTMLElement[]): Set<Node> {
   }
 
   return parents;
+}
+
+export function getActiveHighlightRecords(): HighlightRecord[] {
+  return activeHighlightRecords;
+}
+
+export function clearActiveHighlightRecords(): void {
+  activeHighlightRecords = [];
+  syncCssHighlights();
 }

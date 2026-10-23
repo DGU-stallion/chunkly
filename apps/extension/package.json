@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "build": "node scripts/clean-dist.mjs && vite build --config vite.options.config.ts && vite build --config vite.content.config.ts && vite build --config vite.background.config.ts && node scripts/copy-manifest.mjs",
+    "package": "pnpm build && node scripts/package-zip.mjs",
     "dev": "node scripts/clean-dist.mjs && node scripts/copy-manifest.mjs && concurrently -n options,content,background \"vite build --config vite.options.config.ts --watch\" \"vite build --config vite.content.config.ts --watch\" \"vite build --config vite.background.config.ts --watch\"",
     "test": "vitest run",
     "lint": "tsc -p tsconfig.json"

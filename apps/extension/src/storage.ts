@@ -6,8 +6,10 @@ import {
   DEFAULT_SETTINGS,
   OFFICIAL_BASE_URL,
   DEFAULT_OFFICIAL_MODEL,
+  isOfficialModel,
   migratePresetId,
   type StoredSettings,
+  type HighlightStyle,
 } from "./types.js";
 
 const STORAGE_KEY = "chunkly.settings";
@@ -55,6 +57,14 @@ export function normalizeSettings(raw: unknown): StoredSettings {
   const baseURL = provider.baseURL as string;
   const apiKey = provider.apiKey as string;
   const model = provider.model as string;
+  const showBubbleTrigger =
+    typeof candidate.showBubbleTrigger === "boolean"
+      ? candidate.showBubbleTrigger
+      : true;
+
+  const rawStyle = candidate.highlightStyle;
+  const highlightStyle: HighlightStyle =
+    rawStyle === "underline" ? "underline" : "highlighter";
 
   if (mode === "custom") {
     // 自定义：三项都尊重用户，只在为空时给一个可用的起点
@@ -65,18 +75,22 @@ export function normalizeSettings(raw: unknown): StoredSettings {
         apiKey,
         model: model || DEFAULT_OFFICIAL_MODEL,
       },
+      showBubbleTrigger,
+      highlightStyle,
     };
   }
 
   // official：端点固定为官方地址（避免残留地址导致 401），
-  // 但**模型保留用户的选择**（这正是之前「改了保存不了」的原因）。
+  // 模型保留用户的选择，但若为已失效/非法的历史模型，则自动规整为官方默认模型
   return {
     mode,
     provider: {
       baseURL: OFFICIAL_BASE_URL,
       apiKey,
-      model: model || DEFAULT_OFFICIAL_MODEL,
+      model: isOfficialModel(model) ? model : DEFAULT_OFFICIAL_MODEL,
     },
+    showBubbleTrigger,
+    highlightStyle,
   };
 }
 
@@ -99,6 +113,7 @@ function sameSettings(a: unknown, b: StoredSettings): boolean {
   const x = a as Partial<StoredSettings>;
   return (
     x.mode === b.mode &&
+    x.showBubbleTrigger === b.showBubbleTrigger &&
     x.provider?.baseURL === b.provider.baseURL &&
     x.provider?.apiKey === b.provider.apiKey &&
     x.provider?.model === b.provider.model

@@ -1,0 +1,389 @@
+/* ========================================================
+ * Chunkly 现代多模态高品质样式表
+ * 1. 风格变量体系：经典荧光笔 (highlighter) / 极简下划线 (underline)
+ * 2. 交互式选区划词悬浮控制栏 (Bubble Bar)
+ * 3. 视听同步播放控制悬浮条 (Floating Audio Player)
+ * 4. 状态 Toast 与轻动效
+ * ======================================================== */
+
+/* --------------------------------------------------------
+ * 0. 调色盘与风格变量体系 (Theme Design Tokens)
+ * -------------------------------------------------------- */
+:root {
+  /* 默认回落：经典莫兰迪实体荧光笔 */
+  --chunkly-bg-0: rgba(254, 243, 199, 0.88);
+  --chunkly-fg-0: #78350F;
+  --chunkly-dec-0: none;
+  --chunkly-border-0: 2px solid rgba(245, 158, 11, 0.45);
+
+  --chunkly-bg-1: rgba(224, 242, 254, 0.88);
+  --chunkly-fg-1: #0369A1;
+  --chunkly-dec-1: none;
+  --chunkly-border-1: 2px solid rgba(14, 165, 233, 0.45);
+
+  --chunkly-bg-2: rgba(220, 252, 231, 0.88);
+  --chunkly-fg-2: #15803D;
+  --chunkly-dec-2: none;
+  --chunkly-border-2: 2px solid rgba(34, 197, 94, 0.45);
+
+  --chunkly-bg-3: rgba(243, 232, 255, 0.88);
+  --chunkly-fg-3: #6B21A8;
+  --chunkly-dec-3: none;
+  --chunkly-border-3: 2px solid rgba(168, 85, 247, 0.45);
+}
+
+/* 风格 1：经典莫兰迪实体荧光笔 (highlighter) */
+:root[data-chunkly-style="highlighter"] {
+  --chunkly-bg-0: rgba(254, 243, 199, 0.88);
+  --chunkly-fg-0: #78350F;
+  --chunkly-dec-0: none;
+  --chunkly-border-0: 2px solid rgba(245, 158, 11, 0.45);
+
+  --chunkly-bg-1: rgba(224, 242, 254, 0.88);
+  --chunkly-fg-1: #0369A1;
+  --chunkly-dec-1: none;
+  --chunkly-border-1: 2px solid rgba(14, 165, 233, 0.45);
+
+  --chunkly-bg-2: rgba(220, 252, 231, 0.88);
+  --chunkly-fg-2: #15803D;
+  --chunkly-dec-2: none;
+  --chunkly-border-2: 2px solid rgba(34, 197, 94, 0.45);
+
+  --chunkly-bg-3: rgba(243, 232, 255, 0.88);
+  --chunkly-fg-3: #6B21A8;
+  --chunkly-dec-3: none;
+  --chunkly-border-3: 2px solid rgba(168, 85, 247, 0.45);
+}
+
+/* 风格 2：极简清晰下划线 (underline) —— 粗细适度、色彩分明且不伤底色 */
+:root[data-chunkly-style="underline"] {
+  --chunkly-bg-0: transparent;
+  --chunkly-fg-0: inherit;
+  --chunkly-dec-0: underline 2.5px solid #D97706;
+  --chunkly-border-0: 2.5px solid #D97706;
+
+  --chunkly-bg-1: transparent;
+  --chunkly-fg-1: inherit;
+  --chunkly-dec-1: underline 2.5px solid #0284C7;
+  --chunkly-border-1: 2.5px solid #0284C7;
+
+  --chunkly-bg-2: transparent;
+  --chunkly-fg-2: inherit;
+  --chunkly-dec-2: underline 2.5px solid #16A34A;
+  --chunkly-border-2: 2.5px solid #16A34A;
+
+  --chunkly-bg-3: transparent;
+  --chunkly-fg-3: inherit;
+  --chunkly-dec-3: underline 2.5px solid #9333EA;
+  --chunkly-border-3: 2.5px solid #9333EA;
+}
+
+
+/* --------------------------------------------------------
+ * 1. 现代模式：CSS Custom Highlight API
+ * -------------------------------------------------------- */
+::highlight(chunkly-0),
+::highlight(chunkly-1),
+::highlight(chunkly-2),
+::highlight(chunkly-3) {
+  text-decoration-skip-ink: none;
+  text-underline-offset: 4.5px;
+}
+
+::highlight(chunkly-0) {
+  background-color: var(--chunkly-bg-0);
+  color: var(--chunkly-fg-0);
+  text-decoration: var(--chunkly-dec-0);
+}
+
+::highlight(chunkly-1) {
+  background-color: var(--chunkly-bg-1);
+  color: var(--chunkly-fg-1);
+  text-decoration: var(--chunkly-dec-1);
+}
+
+::highlight(chunkly-2) {
+  background-color: var(--chunkly-bg-2);
+  color: var(--chunkly-fg-2);
+  text-decoration: var(--chunkly-dec-2);
+}
+
+::highlight(chunkly-3) {
+  background-color: var(--chunkly-bg-3);
+  color: var(--chunkly-fg-3);
+  text-decoration: var(--chunkly-dec-3);
+}
+
+/* 视听同步激活高亮 (Karaoke & Shadowing) */
+::highlight(chunkly-active) {
+  text-decoration-skip-ink: none;
+  text-underline-offset: 4.5px;
+  background-color: #FEF08A;
+  color: #0F172A;
+  text-decoration: underline 3px solid #4F46E5;
+}
+
+/* 下划线风格下，朗读激活态也严格保持下划线形式：无背景色，下划线加粗为醒目蓝紫色，彻底杜绝降部字母截断 */
+:root[data-chunkly-style="underline"] ::highlight(chunkly-active) {
+  background-color: transparent !important;
+  color: inherit !important;
+  text-decoration: underline 3.5px solid #4F46E5 !important;
+  text-decoration-skip-ink: none !important;
+  text-underline-offset: 4.5px !important;
+}
+
+/* --------------------------------------------------------
+ * 2. 实体 DOM 模式 (span 包裹)
+ * -------------------------------------------------------- */
+.chunkly-chunk {
+  display: inline;
+  position: relative;
+  border-radius: 4px;
+  padding: 1px 3px;
+  margin: 0 1px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  transition: background-color 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+  cursor: text;
+}
+
+.chunkly-chunk:hover {
+  filter: brightness(0.96);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+/* 划选文字穿透保障：当用户用鼠标拖选文本时，选区样式强制覆盖，杜绝混色暗淡 */
+.chunkly-chunk::selection {
+  background-color: #2563EB !important;
+  color: #FFFFFF !important;
+}
+
+.chunkly-chunk-0 {
+  background-color: var(--chunkly-bg-0);
+  color: var(--chunkly-fg-0);
+  border-bottom: var(--chunkly-border-0);
+}
+
+.chunkly-chunk-1 {
+  background-color: var(--chunkly-bg-1);
+  color: var(--chunkly-fg-1);
+  border-bottom: var(--chunkly-border-1);
+}
+
+.chunkly-chunk-2 {
+  background-color: var(--chunkly-bg-2);
+  color: var(--chunkly-fg-2);
+  border-bottom: var(--chunkly-border-2);
+}
+
+.chunkly-chunk-3 {
+  background-color: var(--chunkly-bg-3);
+  color: var(--chunkly-fg-3);
+  border-bottom: var(--chunkly-border-3);
+}
+
+/* 针对 underline 风格的下边距安全区（彻底防止 q, y, g, p 降部与下划线粘连相撞） */
+:root[data-chunkly-style="underline"] .chunkly-chunk {
+  padding-bottom: 3.5px !important;
+}
+
+/* 针对 underline 风格的 DOM 卡拉OK发音激活态：无底色，仅保留醒目的加粗下划线 */
+:root[data-chunkly-style="underline"] .chunkly-chunk.chunkly-chunk-active {
+  background-color: transparent !important;
+  color: inherit !important;
+  box-shadow: none !important;
+  border-bottom: 3.5px solid #4F46E5 !important;
+  padding-bottom: 3.5px !important;
+}
+
+
+/* 卡拉OK视听同步发音高亮 */
+.chunkly-chunk.chunkly-chunk-active {
+  background-color: #FEF08A !important;
+  color: #0F172A !important;
+  box-shadow: 0 0 0 2px #4F46E5, 0 2px 8px rgba(79, 70, 229, 0.28) !important;
+  border-bottom: 2.5px solid #4F46E5 !important;
+  border-radius: 4px;
+  z-index: 2;
+  transition: all 0.12s ease;
+}
+
+.chunkly-chunk.chunkly-chunk-active::selection {
+  background-color: #2563EB !important;
+  color: #FFFFFF !important;
+}
+
+/* 3. 选区划词悬浮控制栏 (Bubble Bar) */
+#chunkly-bubble-trigger {
+  position: absolute;
+  z-index: 2147483646;
+  height: 30px;
+  padding: 2px 6px;
+  border-radius: 15px;
+  background: #1E1B4B;
+  color: #FFFFFF;
+  box-shadow: 0 4px 14px rgba(30, 27, 75, 0.28), 0 1px 3px rgba(0, 0, 0, 0.1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.15s ease;
+  user-select: none;
+  font: 600 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  animation: chunkly-bubble-pop 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.chunkly-bubble-btn {
+  background: transparent;
+  border: none;
+  color: #FFFFFF;
+  padding: 4px 8px;
+  border-radius: 11px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font: inherit;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.chunkly-bubble-btn:hover {
+  background: rgba(255, 255, 255, 0.18);
+  transform: scale(1.04);
+}
+
+.chunkly-bubble-btn:active {
+  transform: scale(0.96);
+}
+
+.chunkly-bubble-sep {
+  display: inline-block;
+  width: 1px;
+  height: 12px;
+  background: rgba(255, 255, 255, 0.2);
+  margin: 0 2px;
+}
+
+.chunkly-bubble-icon {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.chunkly-bubble-text {
+  letter-spacing: 0.2px;
+}
+
+/* 4. 视听同步播放控制悬浮条 (Floating Audio Player) */
+#chunkly-player-bar {
+  position: fixed;
+  z-index: 2147483647;
+  right: 24px;
+  bottom: 24px;
+  padding: 8px 14px;
+  border-radius: 20px;
+  background: #0F172A;
+  color: #F8FAFC;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.38), 0 2px 6px rgba(0, 0, 0, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font: 500 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  user-select: none;
+  animation: chunkly-toast-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.chunkly-player-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 10px;
+  background: #1E293B;
+  color: #38BDF8;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.chunkly-player-badge:hover {
+  background: #334155;
+}
+
+.chunkly-player-btn {
+  background: transparent;
+  border: none;
+  color: #F8FAFC;
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease;
+}
+
+.chunkly-player-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.chunkly-player-btn.active {
+  color: #38BDF8;
+}
+
+.chunkly-player-close {
+  color: #94A3B8;
+  font-size: 14px;
+  cursor: pointer;
+  margin-left: 2px;
+}
+
+.chunkly-player-close:hover {
+  color: #F1F5F9;
+}
+
+@keyframes chunkly-bubble-pop {
+  0% { transform: scale(0.6); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* 5. 状态 Toast 提示 */
+#chunkly-toast {
+  position: fixed;
+  z-index: 2147483647;
+  right: 20px;
+  bottom: 20px;
+  padding: 9px 15px;
+  border-radius: 8px;
+  background: #0F172A;
+  color: #F8FAFC;
+  font: 500 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.35), 0 2px 6px rgba(0, 0, 0, 0.15);
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  pointer-events: none;
+  animation: chunkly-toast-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+#chunkly-toast.chunkly-toast-loading::before {
+  content: "";
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  border-top-color: #60A5FA;
+  border-radius: 50%;
+  animation: chunkly-spin 0.75s linear infinite;
+}
+
+@keyframes chunkly-toast-in {
+  from { transform: translateY(8px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes chunkly-spin {
+  to { transform: rotate(360deg); }
+}

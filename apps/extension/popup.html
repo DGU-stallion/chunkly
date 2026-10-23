@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chunkly 控制面板</title>
+    <style>
+      :root {
+        --bg: #FAFAF9;
+        --card-bg: #FFFFFF;
+        --border: #E7E5E4;
+        --text: #1C1917;
+        --text-muted: #78716C;
+        --primary: #4F46E5;
+        --primary-hover: #4338CA;
+        --radius: 10px;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        width: 320px;
+        background: var(--bg);
+        color: var(--text);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif;
+        font-size: 13px;
+        line-height: 1.5;
+        padding: 16px;
+        user-select: none;
+      }
+
+      .header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 14px;
+        padding-bottom: 12px;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .logo {
+        width: 28px;
+        height: 28px;
+        border-radius: 6px;
+      }
+
+      .title-box {
+        flex: 1;
+      }
+
+      .title {
+        font-size: 15px;
+        font-weight: 700;
+        color: var(--text);
+        letter-spacing: -0.2px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .tag {
+        font-size: 10px;
+        font-weight: 600;
+        color: #4F46E5;
+        background: #EEF2FF;
+        padding: 1px 6px;
+        border-radius: 4px;
+      }
+
+      .subtitle {
+        font-size: 11px;
+        color: var(--text-muted);
+      }
+
+      .card {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 12px;
+        margin-bottom: 10px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+      }
+
+      .row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .row:not(:last-child) {
+        margin-bottom: 12px;
+        padding-bottom: 10px;
+        border-bottom: 1px dashed var(--border);
+      }
+
+      .label-group {
+        display: flex;
+        flex-direction: column;
+      }
+
+      .label-title {
+        font-weight: 600;
+        font-size: 12px;
+        color: var(--text);
+      }
+
+      .label-desc {
+        font-size: 11px;
+        color: var(--text-muted);
+      }
+
+      /* Switch */
+      .switch {
+        position: relative;
+        display: inline-block;
+        width: 36px;
+        height: 20px;
+        flex-shrink: 0;
+      }
+
+      .switch input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+      }
+
+      .slider {
+        position: absolute;
+        cursor: pointer;
+        top: 0; left: 0; right: 0; bottom: 0;
+        background-color: #D6D3D1;
+        transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        border-radius: 20px;
+      }
+
+      .slider:before {
+        position: absolute;
+        content: "";
+        height: 14px;
+        width: 14px;
+        left: 3px;
+        bottom: 3px;
+        background-color: white;
+        transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        border-radius: 50%;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+      }
+
+      input:checked + .slider {
+        background-color: var(--primary);
+      }
+
+      input:checked + .slider:before {
+        transform: translateX(16px);
+      }
+
+      /* Select */
+      .select-model {
+        background: #F5F5F4;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 5px 8px;
+        font-size: 12px;
+        color: var(--text);
+        outline: none;
+        cursor: pointer;
+        max-width: 150px;
+      }
+
+      .select-model:focus {
+        border-color: var(--primary);
+      }
+
+      /* Flywheel info */
+      .flywheel-box {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .stat-text {
+        font-size: 12px;
+        color: var(--text-muted);
+      }
+
+      .stat-highlight {
+        color: #4F46E5;
+        font-weight: 600;
+      }
+
+      .btn-sm {
+        background: #EEF2FF;
+        color: #4F46E5;
+        border: 1px solid #C7D2FE;
+        border-radius: 5px;
+        padding: 4px 8px;
+        font-size: 11px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.15s ease;
+      }
+
+      .btn-sm:hover {
+        background: #E0E7FF;
+      }
+
+      .btn-sm:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      .shortcuts-card {
+        padding: 8px 12px;
+        font-size: 11px;
+        color: var(--text-muted);
+        background: #F5F5F4;
+        border-radius: 8px;
+        margin-bottom: 12px;
+      }
+
+      .shortcut-item {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 4px;
+      }
+
+      .shortcut-item:last-child {
+        margin-bottom: 0;
+      }
+
+      kbd {
+        background: #FFFFFF;
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        padding: 1px 4px;
+        font-size: 10px;
+        font-family: inherit;
+        box-shadow: 0 1px 0 rgba(0,0,0,0.05);
+      }
+
+      .footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding-top: 4px;
+      }
+
+      .link-btn {
+        background: none;
+        border: none;
+        color: var(--primary);
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 0;
+      }
+
+      .link-btn:hover {
+        text-decoration: underline;
+      }
+
+      .hint-msg {
+        font-size: 10px;
+        color: #10B981;
+        opacity: 0;
+        transition: opacity 0.2s ease;
+      }
+
+      .hint-msg.visible {
+        opacity: 1;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="header">
+      <img src="icons/icon-48.png" alt="Chunkly Logo" class="logo" />
+      <div class="title-box">
+        <h1 class="title">Chunkly <span class="tag">Pro</span></h1>
+        <p class="subtitle">自然语感 · 意群流畅阅读</p>
+      </div>
+    </header>
+
+    <main>
+      <div class="card">
+        <div class="row">
+          <div class="label-group">
+            <span class="label-title">划词快捷气泡</span>
+            <span class="label-desc">选中文本时浮现 ✨ Chunk 按钮</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="toggle-bubble" />
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="row">
+          <div class="label-group">
+            <span class="label-title">高亮风格</span>
+            <span class="label-desc">意群视觉展示样式</span>
+          </div>
+          <select id="select-style" class="select-model">
+            <option value="highlighter">经典荧光笔 (默认)</option>
+            <option value="underline">极简清晰下划线</option>
+          </select>
+        </div>
+
+        <div class="row">
+          <div class="label-group">
+            <span class="label-title">切分模型</span>
+            <span class="label-desc" id="model-mode-desc">官方端点直连</span>
+          </div>
+          <select id="select-model" class="select-model"></select>
+        </div>
+      </div>
+
+      <div class="shortcuts-card">
+        <div class="shortcut-item">
+          <span>切分选区</span>
+          <span><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>C</kbd></span>
+        </div>
+        <div class="shortcut-item">
+          <span>意群朗读</span>
+          <span><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>S</kbd></span>
+        </div>
+        <div class="shortcut-item">
+          <span>清除高亮</span>
+          <span><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>Z</kbd></span>
+        </div>
+        <div class="shortcut-item">
+          <span>切分标准</span>
+          <span>母语者语调意群 (Thought Groups)</span>
+        </div>
+      </div>
+    </main>
+
+    <footer class="footer">
+      <button id="btn-open-options" class="link-btn" type="button">⚙️ 打开详细设置</button>
+      <span id="save-hint" class="hint-msg">已自动保存</span>
+    </footer>
+
+    <script type="module" src="src/popup.ts"></script>
+  </body>
+</html>
